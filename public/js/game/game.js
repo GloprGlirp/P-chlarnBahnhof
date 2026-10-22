@@ -89,6 +89,8 @@ export class Game {
       if (!locked && this.running && !this.input.chatOpen && !this.ended) this.app.showPause(this);
       if (locked) this.app.hidePause();
     };
+    this._esc = (e) => { if (e.code === 'Escape' && !this.input.locked && !this.paused && !this.ended && !this.input.chatOpen) this.app.showPause(this); };
+    window.addEventListener('keydown', this._esc);
     this._resize = () => this.resize();
     window.addEventListener('resize', this._resize);
     this.resize();
@@ -225,6 +227,7 @@ export class Game {
         this.loadMatch(m);
         this.app.hideEnd();
         this.ended = false;
+        this.hudEl.classList.remove('hidden');
         if (this.settings && !this.input.locked && !this.paused) { /* Klick zum Weiterspielen */ }
         const M = MODES[m.mode];
         if (m.mode !== 'snd' || !this.sndBannerShown) this.hud.banner(M.name, `${this.map.name} · ${M.desc}`, 4);
@@ -340,6 +343,7 @@ export class Game {
     if (k === 'defused') { this.hud.banner(m.text, '', 2.5); audio.announce(this.modeState && this.modeState.at === myTeam ? 'bad' : 'good'); return; }
     if (k === 'roundend') { this.hud.banner(m.team === myTeam ? 'Runde gewonnen' : 'Runde verloren', m.text, 4, m.team === myTeam ? '#e8c56c' : '#ff5a4a'); audio.announce(m.team === myTeam ? 'good' : 'bad'); return; }
     if (k === 'round') { this.hud.banner(m.text, '', 3); return; }
+    if (k === 'uav') { this.hud.banner(m.team === myTeam ? 'Drohne aktiv' : 'Feindliche Drohne', m.text, 2.5, m.team === myTeam ? '#7fb3ff' : '#ff8a5c'); audio.announce(m.team === myTeam ? 'good' : 'bad'); return; }
     if (k === 'bombpick' || k === 'bombdrop') { if (m.team === myTeam) this.hud.info(m.text); return; }
     if (k === 'matchend') return;
     this.hud.info(m.text);
@@ -347,6 +351,7 @@ export class Game {
 
   onEnd(m) {
     this.ended = true;
+    this.hudEl.classList.add('hidden');
     this.input.unlock();
     this.app.showEnd(m, this);
   }
@@ -888,6 +893,20 @@ export class Game {
       this.regenT = (this.regenT || 0) + dt;
     }
     const myPos = me.alive ? { x: me.ms.pos.x, z: me.ms.pos.z, yaw: me.yaw, team: this.team } : this.spectate ? { x: this.spectate.pos.x, z: this.spectate.pos.z, yaw: this.spectate.yaw, team: this.team } : null;
+    // Granatenwarnung
+    let nadeAng = null;
+    if (me.alive) {
+      for (const [, kind, x, y, z] of (this.effects.lastNades || [])) {
+        if (kind !== 'frag' && kind !== 'semtex') continue;
+        const dx = x - me.ms.pos.x, dz = z - me.ms.pos.z;
+        if (Math.hypot(dx, dz) < 7 && Math.abs(y - me.ms.pos.y) < 4) {
+          const fx = -Math.sin(me.yaw), fz = -Math.cos(me.yaw), rx = Math.cos(me.yaw), rz = -Math.sin(me.yaw);
+          nadeAng = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
+          break;
+        }
+      }
+    }
+    this.hud.nadeWarning(nadeAng);
     this.mmT = (this.mmT || 0) + dt;
     if (this.mmT > 1 / 30) { this.mmT = 0; this.hud.drawMinimap(myPos, this.players.values(), m, this.map, this.mode); }
   }
@@ -935,6 +954,7 @@ export class Game {
     this.offNet();
     this.input.dispose();
     window.removeEventListener('resize', this._resize);
+    window.removeEventListener('keydown', this._esc);
     this.renderer.domElement.removeEventListener('click', this._click);
     for (const p of this.players.values()) p.dispose();
     this.effects.clear();

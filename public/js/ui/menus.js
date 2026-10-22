@@ -406,18 +406,20 @@ export function renderPause(app, game) {
     <header class="topbar"><h1 class="wordmark" style="font-size:56px">PAUSE</h1>
       <div class="xptext" style="text-align:right">${esc(room.name)} · ${esc(MODES[game.mode].name)} · ${esc(game.map.name)}${room.private ? `<br>Einladungscode: <b style="color:var(--brass-hi);font-size:22px">${esc(room.code)}</b>` : ''}</div>
     </header>
-    <div class="layout">
-      <nav class="nav pause-actions" style="padding-right:10px">
+    <div class="pause-body">
+      <div class="pause-actions">
         <button class="btn" id="resume">Weiterspielen</button>
         <button class="btn ghost" id="leave">Match verlassen</button>
-      </nav>
-      <main class="content">
+      </div>
+      <section>
         <h3 style="margin-top:0">Klasse wählen</h3>
-        <div class="class-list" style="max-width:420px">${classes.map((k, i) => `<button data-c="${i}" class="${i === cur ? 'on' : ''}">${esc(k.name)}<span>${esc(WEAPONS[k.primary.id].name)} · ${esc(WEAPONS[k.secondary.id].name)} · ${esc(k.perks.map(p => PERKS[p].name).join(', '))}</span></button>`).join('')}</div>
-        <p class="hint">Die Klasse gilt beim nächsten Spawn – direkt nach dem Spawn sofort. Klassen bearbeitest du im Hauptmenü.</p>
-        <h3>Einstellungen</h3>
+        <div class="class-list">${classes.map((k, i) => `<button data-c="${i}" class="${i === cur ? 'on' : ''}">${esc(k.name)}<span>${esc(WEAPONS[k.primary.id].name)} · ${esc(WEAPONS[k.secondary.id].name)} · ${esc(k.perks.map(p => PERKS[p].name).join(', '))}</span></button>`).join('')}</div>
+        <p class="hint">Gilt beim nächsten Spawn – kurz nach dem Spawn sofort. Bearbeiten kannst du Klassen im Hauptmenü.</p>
+      </section>
+      <section>
+        <h3 style="margin-top:0">Einstellungen</h3>
         <div class="settings-wrap"></div>
-      </main>
+      </section>
     </div>
   </div>`;
   $(root, '#resume').onclick = () => { app.hidePause(); game.input.lock(); };

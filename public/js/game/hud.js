@@ -18,6 +18,7 @@ export class Hud {
       <div class="cross"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
       <div class="hitm"><i style="left:3px;top:3px;transform:rotate(45deg)"></i><i style="left:-13px;top:3px;transform:rotate(-45deg)"></i><i style="left:3px;top:-5px;transform:rotate(-45deg)"></i><i style="left:-13px;top:-5px;transform:rotate(45deg)"></i></div>
       <div class="dmgdir"></div>
+      <div class="nadewarn"></div>
       <div class="minimap"><canvas width="200" height="200"></canvas></div>
       <div class="modebar"></div>
       <div class="flags"></div>
@@ -38,7 +39,7 @@ export class Hud {
     const q = s => el.querySelector(s);
     this.$ = {
       vign: q('.vign'), scope: q('.scope'), cross: q('.cross'), hitm: q('.hitm'), dmgdir: q('.dmgdir'),
-      mm: q('.minimap canvas'), modebar: q('.modebar'), flags: q('.flags'), snd: q('.sndinfo'), kf: q('.killfeed'),
+      mm: q('.minimap canvas'), nade: q('.nadewarn'), modebar: q('.modebar'), flags: q('.flags'), snd: q('.sndinfo'), kf: q('.killfeed'),
       xp: q('.xpfeed'), banner: q('.banner'), msgs: q('.msgs'), look: q('.lookname'), hpn: q('.hpn'), hpbar: q('.hp .bar i'),
       cls: q('.cls'), wname: q('.wname'), count: q('.count'), equip: q('.equip'), chat: q('.chat'), center: q('.center-msg'),
       board: q('.board'), flash: q('.flash'), fps: q('.fps'), hp: q('.hp'), ammo: q('.ammo'),
@@ -122,6 +123,7 @@ export class Hud {
       if (!p.alive || !p.model.visible) continue;
       let show = p.friendly;
       if (!show) { const pt = this.enemyPings.get(p.id); show = pt && now - pt < 1800; }
+      if (!show && modeState && modeState.u && modeState.u[me.team] && !(p.flags & 512)) show = true;
       if (!show) continue;
       const [x, y] = tr(p.pos.x, p.pos.z);
       if (x < -5 || y < -5 || x > W + 5 || y > W + 5) continue;
@@ -166,6 +168,13 @@ export class Hud {
   }
 
   flash(s) { this.flashT = s; this.flashMax = s; }
+
+  nadeWarning(angle) {
+    const el = this.$.nade;
+    if (angle === null) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.style.transform = `rotate(${angle}rad) translateY(-130px) rotate(${-angle}rad)`;
+  }
 
   killfeed(k, v, w, head, roster, myId) {
     const name = id => { const r = roster.get(id); return r ? `<span class="c-t${r.team}">${esc(r.name)}</span>` : '?'; };

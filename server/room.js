@@ -175,6 +175,7 @@ export class Room {
     this.grenades = [];
     this.world.smokes = [];
     this.matchStart = now();
+    this.uav = [0, 0];
     this.timeEnd = now() + (this.M.timeLimit || 0) * 1000 + 6000;
     this.firstBlood = false;
     for (const p of this.players.values()) {
@@ -694,6 +695,10 @@ export class Room {
       if (info.melee) this.giveXp(k, XP.melee, 'Nahkampf');
       if (!this.firstBlood) { this.firstBlood = true; this.giveXp(k, XP.firstBlood, 'Erstes Blut'); }
       if (k.streak >= 3) this.giveXp(k, XP.streak, `${k.streak}er-Serie`);
+      if (k.streak === 4 || k.streak === 9) {
+        this.uav[k.team] = t + 18000;
+        this.event(`${k.name} ruft eine Aufklärungsdrohne`, { kind: 'uav', team: k.team });
+      }
       if (WEAPONS[info.weapon]) k.weaponXpMatch[info.weapon] = (k.weaponXpMatch[info.weapon] || 0) + 100 + (info.head ? 25 : 0);
       if (k.perks.includes('scavenger') && k.alive) {
         for (const slot of ['primary', 'secondary']) k.ammo[slot].res = Math.min(k.stats[slot].reserve * 1.5, k.ammo[slot].res + k.stats[slot].mag);
@@ -849,10 +854,11 @@ export class Room {
       if (t < p.spawnProtUntil) fl |= 64;
       if (p.interact) fl |= 128;
       if (p.tac) fl |= 256;
+      if (p.perks && p.perks.includes('ghost')) fl |= 512;
       ps.push([p.id, r2(p.pos.x), r2(p.pos.y), r2(p.pos.z), r3(p.yaw), r3(p.pitch), p.stance, fl, p.slot === 'primary' ? 0 : 1]);
     }
     const gs = this.grenades.map(g => [g.id, g.kind, r2(g.x), r2(g.y), r2(g.z)]);
-    const m = { ph: this.phase, sc: this.score };
+    const m = { ph: this.phase, sc: this.score, u: [this.uav[0] > t ? 1 : 0, this.uav[1] > t ? 1 : 0] };
     if (this.phase === 'pre' || this.phase === 'post' || this.phase === 'roundEnd') m.pe = Math.max(0, Math.round((this.phaseEnd - t) / 100) / 10);
     if (this.mode !== 'snd') m.tl = Math.max(0, Math.round((this.timeEnd - t) / 1000));
     if (this.flags) m.f = this.flags.map(f => [f.owner, f.capTeam, Math.round(f.prog * 100) / 100, f.contested ? 1 : 0]);
