@@ -370,10 +370,15 @@ export function renderSettings(app, c, compact = false) {
     ['scale', 'Renderauflösung', 0.5, 1, 0.05],
   ];
   const checks = [
-    ['invertY', 'Maus-Y umkehren'], ['toggleAds', 'Zielen umschalten statt halten'], ['shadows', 'Schatten'], ['showFps', 'FPS und Ping anzeigen'],
+    ['invertY', 'Maus-Y umkehren'], ['toggleAds', 'Zielen umschalten statt halten'], ['showFps', 'FPS und Ping anzeigen'],
   ];
   c.innerHTML = `${compact ? '' : '<h2>Einstellungen</h2><p class="lead">Wird in diesem Browser gespeichert.</p>'}
     <div class="settings">
+      <div class="setting"><label for="s_quality">Grafikqualität</label><select id="s_quality">
+        <option value="low" ${S.quality === 'low' ? 'selected' : ''}>Niedrig – ohne Schatten</option>
+        <option value="medium" ${S.quality === 'medium' ? 'selected' : ''}>Mittel – Schatten</option>
+        <option value="high" ${S.quality === 'high' ? 'selected' : ''}>Hoch – Schatten, Umgebungsverdeckung, Bloom</option>
+      </select><span></span></div>
       ${rows.map(([k, l, mi, ma, st]) => `<div class="setting"><label for="s_${k}">${l}</label><input id="s_${k}" type="range" min="${mi}" max="${ma}" step="${st}" value="${S[k]}"><span class="val" data-v="${k}">${fmt(k, S[k])}</span></div>`).join('')}
       ${checks.map(([k, l]) => `<label class="check" style="padding:8px 0;border-bottom:1px solid rgba(62,74,46,.6);margin:0"><input type="checkbox" id="s_${k}" ${S[k] ? 'checked' : ''}> ${l}</label>`).join('')}
       ${compact ? '' : `<h3>Steuerung</h3><div class="keys">
@@ -393,6 +398,7 @@ export function renderSettings(app, c, compact = false) {
     $(c, `#s_${k}`).oninput = e => { S[k] = +e.target.value; $(c, `[data-v="${k}"]`).textContent = fmt(k, S[k]); app.saveSettings(); };
   }
   for (const [k] of checks) $(c, `#s_${k}`).onchange = e => { S[k] = e.target.checked; app.saveSettings(); };
+  $(c, '#s_quality').onchange = e => { S.quality = e.target.value; app.saveSettings(); };
 }
 
 // ================================================================ PAUSE

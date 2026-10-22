@@ -56,7 +56,12 @@ function makeBuilder() {
   const container = (cx, cz, alongX, mat, y0 = 0) =>
     alongX ? box(cx, cz, 6.1, 2.45, 2.6, mat, y0) : box(cx, cz, 2.45, 6.1, 2.6, mat, y0);
   const crate = (cx, cz, s = 1.2, y0 = 0, mat = 'crate') => box(cx, cz, s, s, s, mat, y0);
-  return { boxes, B, box, wallX, wallZ, stairs, container, crate };
+  // Requisiten mit eigener Form (Kollision bleibt eine Box)
+  const barrel = (cx, cz, mat = 'barrelRed', y0 = 0) => box(cx, cz, 0.6, 0.6, 0.9, mat, y0, { shape: 'barrel' });
+  const pallets = (cx, cz, n = 3, rot = false) => box(cx, cz, rot ? 1.0 : 1.2, rot ? 1.2 : 1.0, 0.15 * n, 'wood', 0, { shape: 'pallet' });
+  const lamp = (cx, cz, h = 4.2) => box(cx, cz, 0.18, 0.18, h, 'metal', 0, { shape: 'lamp' });
+  const bench = (cx, cz, alongX = true) => box(cx, cz, alongX ? 1.7 : 0.5, alongX ? 0.5 : 1.7, 0.48, 'wood', 0, { shape: 'bench' });
+  return { boxes, B, box, wallX, wallZ, stairs, container, crate, barrel, pallets, lamp, bench };
 }
 
 // Blickrichtung grob Richtung Kartenmitte
@@ -69,6 +74,20 @@ function mirrorX(boxes) {
     out.push({ ...b, min: [-b.max[0], b.min[1], b.min[2]], max: [-b.min[0], b.max[1], b.max[2]] });
   }
   return out;
+}
+
+function werftDecals() {
+  const d = [];
+  // gelbe Fahrspurmarkierungen außerhalb der Halle
+  for (let x = -44; x <= 44; x += 4) if (Math.abs(x) > 13) d.push({ kind: 'line', x, z: 0.0, w: 2.2, d: 0.18, rot: 0 });
+  for (let x = -44; x <= 44; x += 4) d.push({ kind: 'line', x, z: -11.3, w: 2.2, d: 0.18, rot: 0 }, { kind: 'line', x, z: 11.3, w: 2.2, d: 0.18, rot: 0 });
+  // Ölflecken
+  let s = 7;
+  const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (let i = 0; i < 26; i++) d.push({ kind: 'stain', x: -44 + r() * 88, z: -31 + r() * 54, w: 1 + r() * 2.5, d: 0.8 + r() * 2, rot: r() * 3 });
+  // Pfützen
+  for (let i = 0; i < 8; i++) d.push({ kind: 'puddle', x: -40 + r() * 80, z: -28 + r() * 50, w: 1.5 + r() * 3, d: 1 + r() * 2, rot: r() * 3 });
+  return d;
 }
 
 // =====================================================================
@@ -122,6 +141,15 @@ function buildWerft() {
   B(-36.2, 3, 22.8, -29.8, 3.25, 29.2, 'roof');
   crate(-35, 28, 0.9, 0, 'wood');
 
+  // Requisiten
+  L.barrel(-29.6, -14.5, 'barrelRed'); L.barrel(-28.9, -14.3, 'barrelBlue');
+  L.barrel(-15.85, -20.6, 'barrelBlue'); L.barrel(-15.85, -21.3, 'barrelRed');
+  L.barrel(-27.2, 27.6, 'barrelGreen'); L.barrel(-26.5, 27.9, 'barrelRed');
+  L.barrel(-40.2, 15.2, 'barrelRed');
+  L.pallets(-19.5, 7.9, 4); L.pallets(-35.2, 4.6, 3, true);
+  L.pallets(-6.5, 14.5, 5);
+  L.lamp(-33, 20.6); L.lamp(-12.3, 25.6); L.lamp(-22, -11.4);
+
   // ---- Lagerhalle Westhälfte ----
   const H = 6;
   wallX(-11, 0, -9, 0.4, H, 'brick', [{ a: -8, b: -5, y0: 1.2, y1: 2.5 }, { a: -2, b: 0, y0: 0, y1: 3.2 }]);
@@ -142,8 +170,8 @@ function buildWerft() {
   // ---- Mittig / asymmetrisch ----
   const M = makeBuilder();
   // Boden
-  M.B(-47, -1, -34, 47, 0, 34, 'asphalt');
-  M.B(-47, -0.99, 24.5, 47, 0.01, 31, 'concreteLight');   // Kai-Kante
+  M.B(-47, -1, -34, 47, 0, 24.5, 'asphalt');
+  M.B(-47, -1, 24.5, 47, 0, 34, 'concreteLight');         // Kai-Kante
   // Außenwände
   M.B(-47, 0, -34, 47, 7, -33, 'concreteWall');
   M.B(-47, 0, -34, -46, 7, 34, 'concreteWall');
@@ -172,7 +200,15 @@ function buildWerft() {
     dom: [{ id: 'A', x: -24, z: 0 }, { id: 'B', x: 0, z: 0 }, { id: 'C', x: 24, z: 0 }],
     snd: [{ id: 'A', x: 24, z: -21 }, { id: 'B', x: 26, z: 19 }],
     bombSpawn: { x: -42, z: 0 },
-    theme: { sky: [0x7fb2e5, 0xd8e6f0], fog: 0xb9cfe0, fogNear: 60, fogFar: 190, sun: [-0.5, 1, 0.35], sunColor: 0xfff1d6, water: true },
+    theme: {
+      hdri: 'quarry_01_1k', skyIntensity: 0.85, envIntensity: 0.55, exposure: 0.9,
+      fog: [0.5, 0.52, 0.5], fogNear: 70, fogFar: 260, haze: 0.35,
+      sun: [0.796, 0.62, 0.579], sunColor: 0xffe6c4, sunIntensity: 2.7, water: true,
+    },
+    decals: werftDecals(),
+    decor: [
+      ...[-8, -3, 3, 8].flatMap(x => [{ type: 'hanglamp', x, y: 5.4, z: -5 }, { type: 'hanglamp', x, y: 5.4, z: 5 }]),
+    ],
   };
 }
 
@@ -235,6 +271,13 @@ function buildAltstadt() {
   box(-8, 18, 2.6, 1.4, 1.1, 'wood');
   box(-3, 26, 1.2, 1.2, 1.2, 'crate');
 
+  // Requisiten
+  L.barrel(-27.0, -13.2, 'barrelWood'); L.barrel(-27.0, -12.5, 'barrelWood');
+  L.barrel(-13.4, 12.3, 'barrelWood');
+  L.lamp(-9, -10.8, 3.8); L.lamp(-9, 10.8, 3.8); L.lamp(-30, -9.5, 3.8);
+  L.bench(-3.8, -9.2); L.bench(-3.8, 9.2);
+  L.pallets(-23, 26.5, 2);
+
   const west = L.boxes.slice();
   const all = west.concat(mirrorX(west));
 
@@ -279,7 +322,20 @@ function buildAltstadt() {
     dom: [{ id: 'A', x: -21, z: -19.5 }, { id: 'B', x: 0, z: 4.5 }, { id: 'C', x: 21, z: 18.5 }],
     snd: [{ id: 'A', x: 21, z: -19.5 }, { id: 'B', x: 17, z: 16 }],
     bombSpawn: { x: -35, z: 0 },
-    theme: { sky: [0xf0a36b, 0xfbe3c4], fog: 0xe9c9a8, fogNear: 45, fogFar: 150, sun: [0.6, 0.7, -0.4], sunColor: 0xffd7a8, water: false },
+    theme: {
+      hdri: 'venice_sunset_1k', skyIntensity: 0.6, envIntensity: 0.5, exposure: 0.9,
+      fog: [0.62, 0.42, 0.3], fogNear: 55, fogFar: 200, haze: 0.3,
+      sun: [0.807, 0.42, 0.587], sunColor: 0xffb47a, sunIntensity: 2.8, water: false,
+    },
+    decals: [
+      { kind: 'stain', x: -15, z: -2, w: 3, d: 2.4, rot: 0.4 }, { kind: 'stain', x: 14, z: 5, w: 2.5, d: 2, rot: 1.2 },
+      { kind: 'stain', x: -25, z: 6, w: 2, d: 1.6, rot: 2 }, { kind: 'stain', x: 6, z: -24, w: 2.6, d: 2, rot: 0.2 },
+    ],
+    decor: [
+      { type: 'laundry', x0: -16, x1: -7, z: -13, y: 4.4 },
+      { type: 'laundry', x0: 7, x1: 16, z: 12.4, y: 4.4 },
+      { type: 'laundry', x0: -16, x1: -8, z: 11.8, y: 4.0 },
+    ],
   };
 }
 

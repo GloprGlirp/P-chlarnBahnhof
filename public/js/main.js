@@ -5,12 +5,15 @@ import { renderLogin, renderMenu, renderPause, renderEnd } from './ui/menus.js';
 import { Game } from './game/game.js';
 import { audio } from './game/audio.js';
 
-const DEFAULTS = { sens: 1.0, adsSens: 0.85, fov: 95, volume: 0.6, scale: 1, invertY: false, toggleAds: false, shadows: true, showFps: false };
+const DEFAULTS = { sens: 1.0, adsSens: 0.85, fov: 95, volume: 0.6, scale: 1, invertY: false, toggleAds: false, quality: 'medium', showFps: false };
 
 class App {
   constructor() {
     this.root = document.getElementById('app');
     this.settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('kh_settings') || '{}') };
+    if (this.settings.shadows === false && !this.settings.quality) this.settings.quality = 'low';
+    delete this.settings.shadows;
+    if (!['low', 'medium', 'high'].includes(this.settings.quality)) this.settings.quality = 'medium';
     this.net = new Net();
     this.profile = null;
     this.game = null;

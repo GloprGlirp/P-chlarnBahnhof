@@ -11,6 +11,7 @@ import { RemotePlayer } from './players.js';
 import { Hud, weaponLabel, esc } from './hud.js';
 import { Input } from './input.js';
 import { audio } from './audio.js';
+import { PostFX } from './postfx.js';
 
 const DEG = Math.PI / 180;
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3();
@@ -110,10 +111,15 @@ export class Game {
   applySettings() {
     const s = this.settings;
     audio.setVolume(s.volume);
-    this.renderer.shadowMap.enabled = !!s.shadows;
-    this.renderer.setPixelRatio(Math.min(2, devicePixelRatio) * s.scale);
+    const q = s.quality || 'medium';
+    this.renderer.shadowMap.enabled = q !== 'low';
+    const pr = Math.min(q === 'low' ? 1 : 2, devicePixelRatio) * s.scale;
+    this.renderer.setPixelRatio(pr);
     this.resize();
-    if (this.world && this.worldShadows !== !!s.shadows) this.rebuildWorld();
+    if (q === 'high' && !this.fx) this.fx = new PostFX(this.renderer, this.scene, this.camera);
+    if (q !== 'high' && this.fx) { this.fx.dispose(); this.fx = null; }
+    if (this.fx) this.fx.setSize(innerWidth, innerHeight, pr);
+    if (this.world && this.worldQuality !== q) this.rebuildWorld();
   }
 
   resize() {
@@ -121,6 +127,7 @@ export class Game {
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
     this.vm.resize(innerWidth / innerHeight);
+    if (this.fx) this.fx.setSize(innerWidth, innerHeight, this.renderer.getPixelRatio());
   }
 
   // ------------------------------------------------------------------ Karte / Match
@@ -142,11 +149,13 @@ export class Game {
 
   rebuildWorld() {
     if (this.world) this.world.dispose();
-    this.worldShadows = !!this.settings.shadows;
+    const q = this.settings.quality || 'medium';
+    this.worldQuality = q;
     this.world = buildWorld(this.scene, this.map, {
-      shadows: this.worldShadows, mode: this.mode, aniso: this.renderer.capabilities.getMaxAnisotropy(),
-      shadowSize: this.settings.scale < 0.8 ? 1024 : 2048,
+      shadows: q !== 'low', mode: this.mode, aniso: Math.min(8, this.renderer.capabilities.getMaxAnisotropy()),
+      shadowSize: q === 'high' ? 4096 : 2048, renderer: this.renderer,
     });
+    this.renderer.toneMappingExposure = this.map.theme.exposure || 1;
     if (!this.bombMesh) {
       const g = new THREE.Group();
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.3), new THREE.MeshStandardMaterial({ color: 0x3b4031, roughness: 0.7 }));
@@ -420,6 +429,8 @@ export class Game {
     });
     this.vm.muzzleFlash(st);
     this.vm.kick(st);
+    if (st.cls !== 'shotgun' && st.cls !== 'sniper') this.vm.ejectCasing(st);
+    else setTimeout(() => this.vm.ejectCasing(st), 320);
     if (!st.suppressed && !st.noFlash) this.effects.flashLight(muzzle, 16, 0.05);
     audio.shot(st.cls, null, st.suppressed);
     // Rückstoß
@@ -551,7 +562,8 @@ export class Game {
     for (const p of this.players.values()) p.update(dt, rt, now);
     this.effects.grenades(this.effects.lastNades || [], dt);
     this.effects.update(dt);
-    this.world.update(now / 1000, this.modeState);
+    this.world.update(now / 1000, this.modeState, this.camera.position);
+    if (this.scene.environment && this.vm.scene.environment !== this.scene.environment) { this.vm.scene.environment = this.scene.environment; this.vm.scene.environmentIntensity = 0.8; }
     this.updateBomb(now);
     this.phys.smokes = this.phys.smokes.filter(s => s.end > now);
 
@@ -913,12 +925,18 @@ export class Game {
 
   render() {
     const r = this.renderer;
-    r.autoClear = true;
-    r.render(this.scene, this.camera);
+    if (this.fx) {
+      this.fx.grade.uniforms.hurt.value = this.me.alive ? Math.max(0, (55 - this.me.hp) / 55) : 0;
+      this.fx.render();
+    } else {
+      r.autoClear = true;
+      r.render(this.scene, this.camera);
+    }
     if (this.me.alive) {
       r.autoClear = false;
       r.clearDepth();
       r.render(this.vm.scene, this.vm.camera);
+      r.autoClear = true;
     }
   }
 
@@ -959,6 +977,7 @@ export class Game {
     for (const p of this.players.values()) p.dispose();
     this.effects.clear();
     if (this.world) this.world.dispose();
+    if (this.fx) { this.fx.dispose(); this.fx = null; }
     this.hudEl.innerHTML = '';
     this.hudEl.classList.add('hidden');
     this.renderer.clear();

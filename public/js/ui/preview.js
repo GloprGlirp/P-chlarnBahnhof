@@ -1,6 +1,7 @@
 // Kleine 3D-Vorschau der Waffe im Waffenschmied
 import * as THREE from 'three';
 import { buildGun } from '../game/models.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 export class GunPreview {
   constructor(canvas) {
@@ -8,11 +9,16 @@ export class GunPreview {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(2, devicePixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.scene = new THREE.Scene();
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.7;
+    pm.dispose();
     this.camera = new THREE.PerspectiveCamera(30, 2, 0.01, 10);
     this.camera.position.set(0.95, 0.3, 0.55);
     this.camera.lookAt(0, 0, 0);
-    this.scene.add(new THREE.HemisphereLight(0xfff4dd, 0x2a3220, 2.2));
+    this.scene.add(new THREE.HemisphereLight(0xfff4dd, 0x2a3220, 0.6));
     const d = new THREE.DirectionalLight(0xffffff, 2.2);
     d.position.set(1, 2, 1.5);
     this.scene.add(d);

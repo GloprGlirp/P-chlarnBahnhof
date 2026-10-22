@@ -19,9 +19,11 @@ await initDB();
 
 const app = express();
 app.use(express.json({ limit: '64kb' }));
-app.use(express.static(path.join(ROOT, 'public'), { maxAge: '1h' }));
+app.use('/assets', express.static(path.join(ROOT, 'public/assets'), { maxAge: '7d' }));
+app.use(express.static(path.join(ROOT, 'public'), { maxAge: '10m' }));
 app.use('/shared', express.static(path.join(ROOT, 'shared'), { maxAge: '1h' }));
 app.use('/vendor/three', express.static(path.join(ROOT, 'node_modules/three/build'), { maxAge: '7d' }));
+app.use('/vendor/three-addons', express.static(path.join(ROOT, 'node_modules/three/examples/jsm'), { maxAge: '7d' }));
 
 const wrap = fn => async (req, res) => {
   try { res.json(await fn(req)); } catch (e) { res.status(400).json({ error: e.message }); }
