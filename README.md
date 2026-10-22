@@ -24,6 +24,7 @@ Dann im Browser `http://localhost:3000` öffnen. Freunde im selben Netzwerk verb
 - **Killstreak:** Aufklärungsdrohne bei 4 Kills in Folge
 - **Netzcode:** Server-autoritativ für Treffer, Schaden und Munition, Lag-Kompensation, Bewegungsprüfung
 - **Accounts:** Registrierung mit Passwort (scrypt-Hash) oder Gastzugang ohne Speicherung
+- **Grafik:** Foto-Materialien (CC0) für Asphalt, Ziegel, Beton und Wellblech, HDRI-Himmel mit passendem Umgebungslicht, Schatten, Normal-Maps, Umgebungsverdeckung, Bloom; drei Qualitätsstufen in den Einstellungen (Niedrig / Mittel / Hoch)
 
 ## Steuerung
 
@@ -64,4 +65,4 @@ shared/   Gemeinsamer Code: Waffen, Karten, Physik, Progression
 public/   Browser-Client: Three.js-Rendering, HUD, Menüs, Sound
 ```
 
-Neue Karten entstehen in `shared/maps.js` aus Boxen; Waffen und Aufsätze stehen in `shared/weapons.js`.
+Neue Karten entstehen in `shared/maps.js` aus Boxen; Waffen und Aufsätze stehen in `shared/weapons.js`. Herkunft und Lizenzen der Assets: [CREDITS.md](CREDITS.md).
