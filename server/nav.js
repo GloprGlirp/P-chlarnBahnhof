@@ -27,26 +27,30 @@ export function buildNav(map, world) {
     return null;
   }
 
+  // Zellen mit freien Nachbarn – für schnelle Sichtlinien-Prüfung beim Glätten
+  const clear = new Uint8Array(nx * nz);
+  for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
+    clear[idx(ix, iz)] = ok(ix, iz) && ok(ix + 1, iz) && ok(ix - 1, iz) && ok(ix, iz + 1) && ok(ix, iz - 1) ? 1 : 0;
+  }
   function lineWalkable(a, b) {
     const dx = b.x - a.x, dz = b.z - a.z;
     const len = Math.hypot(dx, dz);
-    const steps = Math.ceil(len / 0.35);
-    for (let i = 0; i <= steps; i++) {
-      const t = i / Math.max(1, steps);
-      const x = a.x + dx * t, z = a.z + dz * t;
-      // etwas Breite prüfen
-      for (const [ox, oz] of [[0, 0], [0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]]) {
-        const [cx, cz] = toCell(x + ox, z + oz);
-        if (!ok(cx, cz)) return false;
-      }
+    const steps = Math.ceil(len / 0.5);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const cx = Math.floor((a.x + dx * t - minX) / cell), cz = Math.floor((a.z + dz * t - minZ) / cell);
+      if (cx < 0 || cz < 0 || cx >= nx || cz >= nz || !clear[cz * nx + cx]) return false;
     }
     return true;
   }
 
-  const g = new Float32Array(nx * nz);
-  const came = new Int32Array(nx * nz);
-  const closed = new Uint32Array(nx * nz);
-  const opened = new Uint32Array(nx * nz);
+  const N = nx * nz;
+  const g = new Float32Array(N);
+  const came = new Int32Array(N);
+  const closed = new Uint32Array(N);
+  const opened = new Uint32Array(N);
+  const heapF = new Float32Array(N * 4);
+  const heapI = new Int32Array(N * 4);
   let gen = 0;
 
   function findPath(ax, az, bx, bz) {
@@ -54,32 +58,43 @@ export function buildNav(map, world) {
     if (!s || !e) return null;
     gen++;
     const si = idx(s[0], s[1]), ei = idx(e[0], e[1]);
-    const heap = []; // [f, i]
+    const ex = e[0], ez = e[1];
+    let hn = 0;
     const push = (f, i) => {
-      heap.push([f, i]);
-      let k = heap.length - 1;
-      while (k > 0) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; }
+      if (hn >= heapF.length) return;
+      let k = hn++;
+      while (k > 0) {
+        const p = (k - 1) >> 1;
+        if (heapF[p] <= f) break;
+        heapF[k] = heapF[p]; heapI[k] = heapI[p]; k = p;
+      }
+      heapF[k] = f; heapI[k] = i;
     };
     const pop = () => {
-      const top = heap[0], last = heap.pop();
-      if (heap.length) {
-        heap[0] = last; let k = 0;
+      const top = heapI[0];
+      hn--;
+      if (hn > 0) {
+        const f = heapF[hn], it = heapI[hn];
+        let k = 0;
         for (;;) {
-          const l = 2 * k + 1, r = l + 1; let m = k;
-          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-          if (m === k) break;
-          [heap[m], heap[k]] = [heap[k], heap[m]]; k = m;
+          const l = 2 * k + 1, r = l + 1;
+          let m = -1, mf = f;
+          if (l < hn && heapF[l] < mf) { m = l; mf = heapF[l]; }
+          if (r < hn && heapF[r] < mf) { m = r; mf = heapF[r]; }
+          if (m < 0) break;
+          heapF[k] = heapF[m]; heapI[k] = heapI[m]; k = m;
         }
+        heapF[k] = f; heapI[k] = it;
       }
       return top;
     };
-    const h = (i) => { const x = i % nx, z = (i / nx) | 0; const dx = Math.abs(x - e[0]), dz = Math.abs(z - e[1]); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+    // leicht gewichtete Heuristik -> deutlich weniger untersuchte Zellen
+    const h = (x, z) => { const dx = Math.abs(x - ex), dz = Math.abs(z - ez); return (Math.max(dx, dz) + 0.414 * Math.min(dx, dz)) * 1.25; };
     g[si] = 0; opened[si] = gen; came[si] = -1;
-    push(h(si), si);
+    push(h(s[0], s[1]), si);
     let found = false, iter = 0;
-    while (heap.length && iter++ < 20000) {
-      const [, cur] = pop();
+    while (hn > 0 && iter++ < 6000) {
+      const cur = pop();
       if (closed[cur] === gen) continue;
       closed[cur] = gen;
       if (cur === ei) { found = true; break; }
@@ -89,12 +104,12 @@ export function buildNav(map, world) {
         const x = cx + dx, z = cz + dz;
         if (!ok(x, z)) continue;
         if (dx && dz && (!ok(cx + dx, cz) || !ok(cx, cz + dz))) continue;
-        const ni = idx(x, z);
+        const ni = z * nx + x;
         if (closed[ni] === gen) continue;
         const ng = g[cur] + (dx && dz ? 1.414 : 1);
         if (opened[ni] !== gen || ng < g[ni]) {
           opened[ni] = gen; g[ni] = ng; came[ni] = cur;
-          push(ng + h(ni), ni);
+          push(ng + h(x, z), ni);
         }
       }
     }
@@ -105,14 +120,14 @@ export function buildNav(map, world) {
     const pts = cells.map(i => center(i % nx, (i / nx) | 0));
     const [tbx, tbz] = toCell(bx, bz);
     if (ok(tbx, tbz)) pts[pts.length - 1] = { x: bx, z: bz };
-    // Glätten
+    // Glätten: so weit wie möglich geradeaus
     const out = [];
     let anchor = { x: ax, z: az };
     let k = 0;
     while (k < pts.length) {
       let far = k;
-      for (let j = Math.min(pts.length - 1, k + 25); j > k; j--) {
-        if (lineWalkable(anchor, pts[j])) { far = j; break; }
+      for (let j = k + 1; j < pts.length && j <= k + 30; j++) {
+        if (lineWalkable(anchor, pts[j])) far = j; else break;
       }
       out.push(pts[far]);
       anchor = pts[far];

@@ -8,6 +8,7 @@ import { buildWorld } from './world.js';
 import { ViewModel } from './viewmodel.js';
 import { Effects } from './effects.js';
 import { RemotePlayer } from './players.js';
+import { buildSoldier } from './models.js';
 import { Hud, weaponLabel, esc } from './hud.js';
 import { Input } from './input.js';
 import { audio } from './audio.js';
@@ -116,13 +117,32 @@ export class Game {
     audio.setVolume(s.volume);
     const q = s.quality || 'medium';
     this.renderer.shadowMap.enabled = q !== 'low';
-    const pr = Math.min(q === 'low' ? 1 : 2, devicePixelRatio) * s.scale;
-    this.renderer.setPixelRatio(pr);
-    this.resize();
+    // Pixel-Dichte begrenzen: hochauflösende Laptop-Displays würden sonst 2-4x so viele Pixel rendern
+    this.basePR = Math.min(q === 'high' ? 1.5 : 1, devicePixelRatio) * (q === 'low' ? 0.85 : 1) * s.scale;
+    if (!this.dynScale) this.dynScale = 1;
+    this.applyPixelRatio();
     if (q === 'high' && !this.fx) this.fx = new PostFX(this.renderer, this.scene, this.camera);
     if (q !== 'high' && this.fx) { this.fx.dispose(); this.fx = null; }
-    if (this.fx) this.fx.setSize(innerWidth, innerHeight, pr);
     if (this.world && this.worldQuality !== q) this.rebuildWorld();
+  }
+
+  applyPixelRatio() {
+    const pr = Math.max(0.45, this.basePR * (this.settings.autoRes !== false ? this.dynScale : 1));
+    if (Math.abs(pr - this.renderer.getPixelRatio()) < 0.01 && this.fx === this._fxSized) return;
+    this._fxSized = this.fx;
+    this.renderer.setPixelRatio(pr);
+    this.resize();
+  }
+
+  // Dynamische Auflösung: bei dauerhaft niedrigen FPS Auflösung senken, bei Luft wieder anheben
+  autoResolution(dt) {
+    if (this.settings.autoRes === false || this.paused) return;
+    const a = this.frameAvg = (this.frameAvg || dt) * 0.95 + dt * 0.05;
+    this.resT = (this.resT || 0) + dt;
+    if (this.resT < 2) return;
+    const fps = 1 / a;
+    if (fps < 48 && this.dynScale > 0.55) { this.dynScale = Math.max(0.55, this.dynScale - 0.1); this.resT = 0; this.applyPixelRatio(); }
+    else if (fps > 75 && this.dynScale < 1) { this.dynScale = Math.min(1, this.dynScale + 0.05); this.resT = -2; this.applyPixelRatio(); }
   }
 
   resize() {
@@ -155,10 +175,14 @@ export class Game {
     const q = this.settings.quality || 'medium';
     this.worldQuality = q;
     this.world = buildWorld(this.scene, this.map, {
-      shadows: q !== 'low', mode: this.mode, aniso: Math.min(8, this.renderer.capabilities.getMaxAnisotropy()),
-      shadowSize: q === 'high' ? 4096 : 2048, renderer: this.renderer,
+      shadows: q !== 'low', mode: this.mode, aniso: Math.min(q === 'high' ? 8 : q === 'medium' ? 4 : 2, this.renderer.capabilities.getMaxAnisotropy()),
+      shadowSize: q === 'high' ? 2048 : 1536, renderer: this.renderer,
     });
     this.renderer.toneMappingExposure = this.map.theme.exposure || 1;
+    // Schatten nicht jeden Frame neu rendern (Mittel: jeden 3. Frame)
+    this.world.sun.shadow.autoUpdate = false;
+    this.world.sun.shadow.needsUpdate = true;
+    this.precompile();
     if (!this.bombMesh) {
       const g = new THREE.Group();
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.3), new THREE.MeshStandardMaterial({ color: 0x3b4031, roughness: 0.7 }));
@@ -171,6 +195,19 @@ export class Game {
     }
     this.scene.add(this.bombMesh);
     this.bombMesh.visible = false;
+  }
+
+  // Shader vorab kompilieren, damit es beim ersten Schuss/ersten Gegner nicht hakt
+  precompile() {
+    try {
+      const warm = [];
+      const add = (o) => { o.position.set(0, -50, 0); this.scene.add(o); warm.push(o); };
+      for (const t of [0x3b8cff, 0xff7a1a]) add(buildSoldier(t));
+      this.effects.flashLight(new THREE.Vector3(0, -50, 0), 0.0001, 0.001);
+      this.renderer.compile(this.scene, this.camera);
+      if (this.vm) this.renderer.compile(this.vm.scene, this.vm.camera);
+      for (const o of warm) this.scene.remove(o);
+    } catch (e) { console.warn('precompile', e); }
   }
 
   // ------------------------------------------------------------------ Netzwerk
@@ -309,6 +346,7 @@ export class Game {
     this.vm.teamHex = TEAMS[this.team].hex;
     this.vm.setLoadout(m.cls);
     this.vm.show('primary');
+    if (!this.vmCompiled) { this.vmCompiled = true; try { this.renderer.compile(this.vm.scene, this.vm.camera); } catch { /* egal */ } }
     this.death = null; this.spectate = null;
     this.crouchToggle = false;
     this.eyeH = PLAYER.standHeight - PLAYER.eyeFromTop;
@@ -522,6 +560,7 @@ export class Game {
     if (this.fpsAcc > 0.5) { this.fps = Math.round(this.fpsN / this.fpsAcc); this.fpsAcc = 0; this.fpsN = 0; }
     try { this.update(dt, performance.now()); } catch (e) { console.error(e); }
     this.render();
+    this.autoResolution(dt);
     this.input.endFrame();
   }
 
@@ -851,6 +890,7 @@ export class Game {
       cam.rotation.set(-0.7, 0, 0);
     }
     if (Math.abs(cam.fov - vfov) > 0.01) { cam.fov = vfov; cam.updateProjectionMatrix(); }
+    this.effects.setProjection(this.renderer.domElement.height, cam.fov);
     cam.updateMatrixWorld();
     const fwd = tmpV.set(0, 0, -1).applyQuaternion(cam.quaternion);
     audio.setListener(cam.position, fwd, { x: 0, y: 1, z: 0 });
@@ -932,11 +972,14 @@ export class Game {
     }
     this.hud.nadeWarning(nadeAng);
     this.mmT = (this.mmT || 0) + dt;
-    if (this.mmT > 1 / 30) { this.mmT = 0; this.hud.drawMinimap(myPos, this.players.values(), m, this.map, this.mode); }
+    if (this.mmT > 1 / 15) { this.mmT = 0; this.hud.drawMinimap(myPos, this.players.values(), m, this.map, this.mode); }
   }
 
   render() {
     const r = this.renderer;
+    const q = this.settings.quality || 'medium';
+    this.frameNo = (this.frameNo || 0) + 1;
+    if (this.world && r.shadowMap.enabled && (q === 'high' || this.frameNo % 3 === 0)) this.world.sun.shadow.needsUpdate = true;
     if (this.fx) {
       this.fx.grade.uniforms.hurt.value = this.me.alive ? Math.max(0, (55 - this.me.hp) / 55) : 0;
       this.fx.render();

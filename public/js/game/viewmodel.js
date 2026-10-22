@@ -177,11 +177,11 @@ export class ViewModel {
     const ads = a.ads;
     const sy = g.userData.sightY, sz = g.userData.sightZ;
     const pistol = a.pistol;
-    const hip = new THREE.Vector3(pistol ? 0.12 : 0.135, pistol ? -0.14 : -0.15, pistol ? -0.38 : -0.4);
+    const hip = (this._hip || (this._hip = new THREE.Vector3())).set(pistol ? 0.12 : 0.135, pistol ? -0.14 : -0.15, pistol ? -0.38 : -0.4);
     const optic = g.userData.optic;
     const relief = pistol && optic === 'iron' ? 0.34 : optic === 'iron' ? 0.13 : optic === 'acog' ? 0.11 : optic === 'scope' ? 0.12 : 0.2;
-    const aim = new THREE.Vector3(0, -sy, -relief - sz);
-    const p = hip.clone().lerp(aim, ads);
+    const aim = (this._aim || (this._aim = new THREE.Vector3())).set(0, -sy, -relief - sz);
+    const p = (this._p || (this._p = new THREE.Vector3())).copy(hip).lerp(aim, ads);
     const amp = (1 - ads * 0.85) * Math.min(1, a.speed / 5);
     const bx = Math.sin(st.bob) * 0.012 * amp, by = -Math.abs(Math.cos(st.bob)) * 0.014 * amp;
     p.x += bx + st.swayX * (1 - ads * 0.7);

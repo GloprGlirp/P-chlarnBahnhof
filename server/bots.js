@@ -63,7 +63,7 @@ export class BotBrain {
 
   onSpawn() {
     this.path = null; this.goal = null; this.goalKind = null; this.target = null;
-    this.nextSense = 0; this.nextGoal = 0; this.strafe = Math.random() < 0.5 ? -1 : 1; this.nextStrafe = 0;
+    this.nextSense = performance.now() + Math.random() * 300; this.nextGoal = performance.now() + Math.random() * 600; this.strafe = Math.random() < 0.5 ? -1 : 1; this.nextStrafe = 0;
     this.lastCheckPos = null; this.lastCheckT = 0; this.stuck = 0;
     this.burstUntil = 0; this.pauseUntil = 0; this.errMag = this.d.err; this.errVec = [0, 0];
     this.alert = null; this.crouch = false; this.holdUntil = 0; this.lookAround = 0; this.thrownAt = 0;
@@ -161,7 +161,18 @@ export class BotBrain {
   setGoal(x, z, kind) {
     this.goal = { x, z };
     this.goalKind = kind;
-    this.path = this.room.nav.findPath(this.p.pos.x, this.p.pos.z, x, z) || [];
+    this.path = [];
+    this.pendingPath = true;
+    this.computePath();
+  }
+
+  // Wegberechnung mit Budget pro Tick, damit nicht alle Bots gleichzeitig rechnen
+  computePath() {
+    if (!this.pendingPath || !this.goal) return;
+    if (this.room.pathBudget <= 0) return;
+    this.room.pathBudget--;
+    this.pendingPath = false;
+    this.path = this.room.nav.findPath(this.p.pos.x, this.p.pos.z, this.goal.x, this.goal.z) || [];
   }
 
   chooseGoal(t) {
@@ -213,7 +224,8 @@ export class BotBrain {
       this.applyMove(inp, dt);
       return;
     }
-    if (t >= this.nextSense) { this.nextSense = t + rnd(140, 220); this.sense(t); }
+    if (t >= this.nextSense) { this.nextSense = t + rnd(160, 240); this.sense(t); }
+    if (this.pendingPath) this.computePath();
     const st = p.stats[p.slot];
     const am = p.ammo[p.slot];
 
@@ -304,7 +316,9 @@ export class BotBrain {
       if (t >= this.nextGoal || !this.path) this.chooseGoal(t);
       const path = this.path;
       while (path && path.length && Math.hypot(path[0].x - p.pos.x, path[0].z - p.pos.z) < 0.8) path.shift();
-      if (path && path.length) {
+      if (this.pendingPath) {
+        // wartet auf Wegberechnung (Budget)
+      } else if (path && path.length) {
         const w = path[0];
         moveDir = [w.x - p.pos.x, w.z - p.pos.z];
         const remaining = path.length;
@@ -374,7 +388,11 @@ export class BotBrain {
   applyMove(inp, dt) {
     const p = this.p;
     if (!p.ms) return;
-    stepMove(this.room.world, p.ms, inp, dt);
+    // Teilschritte, damit schnelle Bots nicht durch dünne Wände rutschen
+    const n = Math.max(1, Math.ceil(dt / (1 / 45)));
+    const tac = inp.tac;
+    for (let i = 0; i < n; i++) { stepMove(this.room.world, p.ms, inp, dt / n); inp.tac = false; inp.jump = inp.jump && i === 0 ? inp.jump : false; }
+    inp.tac = tac;
     p.pos.x = p.ms.pos.x; p.pos.y = p.ms.pos.y; p.pos.z = p.ms.pos.z;
     p.vel = { ...p.ms.vel };
     p.stance = p.ms.stance;

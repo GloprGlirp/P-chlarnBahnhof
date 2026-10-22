@@ -2,9 +2,9 @@
 
 export const GAME_NAME = 'KUGELHAGEL';
 
-export const TICK_RATE = 30;          // Server-Simulation (Hz)
-export const SNAPSHOT_RATE = 30;      // Snapshots an Clients (Hz)
-export const CLIENT_SEND_RATE = 30;   // Client -> Server Zustand (Hz)
+export const TICK_RATE = 20;          // Server-Simulation (Hz)
+export const SNAPSHOT_RATE = 20;      // Snapshots an Clients (Hz)
+export const CLIENT_SEND_RATE = 20;   // Client -> Server Zustand (Hz)
 export const INTERP_DELAY = 100;      // ms Interpolation für andere Spieler
 export const MAX_REWIND = 250;        // ms maximale Lag-Kompensation
 

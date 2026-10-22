@@ -76,7 +76,8 @@ function rail(parent, m, x0, x1, y) {
 }
 
 // Fasst unbewegliche Teile pro Material zu einem Mesh zusammen (weniger Draw-Calls)
-function mergeStatic(group, keep = new Set()) {
+// flat: Material, das alle einfarbigen Teile ersetzt (Farbe wandert in Vertex-Farben) -> weniger Draw-Calls
+function mergeStatic(group, keep = new Set(), flat = null) {
   group.updateMatrixWorld(true);
   const inv = group.matrixWorld.clone().invert();
   const buckets = new Map();
@@ -89,9 +90,22 @@ function mergeStatic(group, keep = new Set()) {
         let geo = c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone();
         geo.applyMatrix4(m);
         for (const name of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
+        if (geo.morphAttributes) geo.morphAttributes = {};
         if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
-        if (!buckets.has(c.material)) buckets.set(c.material, []);
-        buckets.get(c.material).push(geo);
+        let target = c.material;
+        if (flat && !c.material.map) {
+          const col = c.material.color.clone();
+          if (c.material.emissive && c.material.emissiveIntensity) col.lerp(new THREE.Color(1, 1, 1), 0.15).multiplyScalar(1.25);
+          const n = geo.attributes.position.count, arr = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) { arr[i * 3] = col.r; arr[i * 3 + 1] = col.g; arr[i * 3 + 2] = col.b; }
+          geo.setAttribute('color', new THREE.Float32BufferAttribute(arr, 3));
+          target = flat;
+        } else if (flat) {
+          const n = geo.attributes.position.count;
+          geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+        }
+        if (!buckets.has(target)) buckets.set(target, []);
+        buckets.get(target).push(geo);
         victims.push(c);
       }
       if (!c.userData.pivot && !c.isMesh) visit(c);
@@ -110,7 +124,18 @@ function mergeStatic(group, keep = new Set()) {
 
 // ---------------------------------------------------------------- Waffen
 // Rückgabe: Gruppe mit Lauf entlang -Z, Ursprung am Griff. userData: muzzle, sightY, sightZ, optic, mag
-export function buildGun(weaponId, attachments = [], camo = 'none') {
+// Fertige Waffen nach Konfiguration cachen und klonen (Geometrie wird geteilt)
+const gunProto = new Map();
+export function buildGun(weaponId, attachments = [], camo = 'none', lite = false) {
+  const key = weaponId + '|' + [...attachments].sort().join(',') + '|' + (camo || 'none') + (lite ? '|lite' : '');
+  if (!gunProto.has(key)) gunProto.set(key, buildGunProto(weaponId, attachments, camo, lite));
+  const g = gunProto.get(key).clone(true);
+  g.userData.muzzle = g.getObjectByName('muzzle');
+  g.userData.mag = g.getObjectByName('mag') || null;
+  return g;
+}
+
+function buildGunProto(weaponId, attachments = [], camo = 'none', lite = false) {
   const W = WEAPONS[weaponId] || WEAPONS.kr7;
   const md = W.model;
   const has = a => attachments.includes(a);
@@ -358,13 +383,21 @@ export function buildGun(weaponId, attachments = [], camo = 'none') {
   }
 
   const keep = new Set([muzzle]);
-  if (mag) keep.add(mag);
-  mergeStatic(g, keep);
-  outer.userData.muzzle = muzzle;
+  if (lite) {
+    // Waffen anderer Spieler: Kleinteile weg, Rest in möglichst wenige Meshes
+    const drop = [];
+    g.traverse(o => { if (o.isMesh && (o.material.transparent || o.material.isMeshBasicMaterial)) drop.push(o); });
+    for (const o of drop) o.parent.remove(o);
+    mergeStatic(g, keep, soldierFlat());
+  } else {
+    if (mag) keep.add(mag);
+    mergeStatic(g, keep);
+  }
+  muzzle.name = 'muzzle';
+  if (mag) mag.name = 'mag';
   outer.userData.sightY = sightY;
   outer.userData.sightZ = -sightX;
   outer.userData.optic = optic;
-  outer.userData.mag = mag;
   outer.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
   return outer;
 }
@@ -378,44 +411,129 @@ function capsule(r, len) {
 }
 function mesh(geo, m, x = 0, y = 0, z = 0) { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); return o; }
 
-export function buildSoldier(teamHex) {
-  const g = new THREE.Group();
+let flatMat = null;
+function soldierFlat() {
+  if (!flatMat) flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.05 });
+  return flatMat;
+}
+
+// Atlas: links Tarnmuster, rechts weiß. Einfarbige Teile zeigen auf die weiße Hälfte und bekommen ihre Farbe per Vertex-Farbe.
+const atlasCache = {};
+function soldierAtlas(teamHex) {
+  if (atlasCache[teamHex]) return atlasCache[teamHex];
+  const camo = paintedMaps('camo', teamHex === 0x3b8cff ? '#4b5a4a' : '#6b5d45');
+  const mk = (img, fill) => {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0, 256, 256);
+    g.fillStyle = fill; g.fillRect(256, 0, 256, 256);
+    return c;
+  };
+  const map = new THREE.CanvasTexture(mk(camo.map.image, '#ffffff'));
+  map.colorSpace = THREE.SRGBColorSpace;
+  const nrm = new THREE.CanvasTexture(mk(camo.normalMap.image, '#8080ff'));
+  const m = new THREE.MeshStandardMaterial({ map, normalMap: nrm, vertexColors: true, roughness: 0.85, metalness: 0.05 });
+  m.normalScale.set(0.6, 0.6);
+  atlasCache[teamHex] = m;
+  return m;
+}
+
+// Für Soldaten: alles einer Gelenkgruppe in EIN Mesh mit Atlas-Material zusammenfassen
+function mergeAtlas(group, atlas, camoMat) {
+  group.updateMatrixWorld(true);
+  const inv = group.matrixWorld.clone().invert();
+  const geos = [];
+  const victims = [];
+  for (const c of [...group.children]) {
+    if (!c.isMesh || c.userData.pivot) continue;
+    const m = new THREE.Matrix4().multiplyMatrices(inv, c.matrixWorld);
+    const geo = (c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone());
+    geo.applyMatrix4(m);
+    for (const name of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
+    const n = geo.attributes.position.count;
+    const uv = geo.attributes.uv ? geo.attributes.uv.array : new Float32Array(n * 2);
+    const col = new Float32Array(n * 3);
+    const isCamo = c.material === camoMat;
+    const color = isCamo ? new THREE.Color(0xdddddd) : c.material.color.clone();
+    if (!isCamo && c.material.emissiveIntensity) color.multiplyScalar(1.35);
+    for (let i = 0; i < n; i++) {
+      if (isCamo) { uv[i * 2] = 0.004 + (((uv[i * 2] % 1) + 1) % 1) * 0.492; }
+      else { uv[i * 2] = 0.75; uv[i * 2 + 1] = 0.5; }
+      col[i * 3] = color.r; col[i * 3 + 1] = color.g; col[i * 3 + 2] = color.b;
+    }
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geos.push(geo);
+    victims.push(c);
+  }
+  for (const v of victims) group.remove(v);
+  if (!geos.length) return;
+  const merged = mergeGeometries(geos, false);
+  for (const g of geos) g.dispose();
+  const mesh = new THREE.Mesh(merged, atlas);
+  mesh.castShadow = true;
+  group.add(mesh);
+}
+const soldierMatCache = {};
+function soldierMats(teamHex) {
+  if (soldierMatCache[teamHex]) return soldierMatCache[teamHex];
   const teamC = new THREE.Color(teamHex);
   const camoBase = teamHex === 0x3b8cff ? '#4b5a4a' : '#6b5d45';
   const camo = paintedMaps('camo', camoBase);
   const uni = new THREE.MeshStandardMaterial({ map: camo.map, normalMap: camo.normalMap, roughness: 0.9, color: 0xdddddd });
   uni.normalScale.set(0.6, 0.6);
-  const vest = new THREE.MeshStandardMaterial({ color: teamHex === 0x3b8cff ? 0x2f3b33 : 0x5a4a34, roughness: 0.85 });
-  const strap = new THREE.MeshStandardMaterial({ color: 0x1f2219, roughness: 0.9 });
-  const team = new THREE.MeshStandardMaterial({ color: teamC, roughness: 0.5, emissive: teamC, emissiveIntensity: 0.35 });
-  const boot = new THREE.MeshStandardMaterial({ color: 0x1d1a16, roughness: 0.75 });
-  const glove = new THREE.MeshStandardMaterial({ color: 0x222420, roughness: 0.85 });
-  const helmM = new THREE.MeshStandardMaterial({ color: teamHex === 0x3b8cff ? 0x3c4a3c : 0x6b5a40, roughness: 0.7 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xc89878, roughness: 0.75 });
-  const gogg = new THREE.MeshStandardMaterial({ color: 0x0c0d0e, roughness: 0.1, metalness: 0.8 });
+  const M = {
+    uni,
+    vest: new THREE.MeshStandardMaterial({ color: teamHex === 0x3b8cff ? 0x2f3b33 : 0x5a4a34, roughness: 0.85 }),
+    strap: new THREE.MeshStandardMaterial({ color: 0x1f2219, roughness: 0.9 }),
+    team: new THREE.MeshStandardMaterial({ color: teamC, roughness: 0.5, emissive: teamC, emissiveIntensity: 0.35 }),
+    boot: new THREE.MeshStandardMaterial({ color: 0x1d1a16, roughness: 0.75 }),
+    glove: new THREE.MeshStandardMaterial({ color: 0x222420, roughness: 0.85 }),
+    helmM: new THREE.MeshStandardMaterial({ color: teamHex === 0x3b8cff ? 0x3c4a3c : 0x6b5a40, roughness: 0.7 }),
+    skin: new THREE.MeshStandardMaterial({ color: 0xc89878, roughness: 0.75 }),
+    gogg: new THREE.MeshStandardMaterial({ color: 0x0c0d0e, roughness: 0.1, metalness: 0.8 }),
+  };
+  soldierMatCache[teamHex] = M;
+  return M;
+}
 
-  const hips = new THREE.Group(); hips.position.y = 0.92; g.add(hips);
+// Fertige Soldaten-Geometrie pro Team einmal bauen und danach nur noch klonen
+const soldierProto = {};
+export function buildSoldier(teamHex) {
+  if (!soldierProto[teamHex]) soldierProto[teamHex] = buildSoldierProto(teamHex);
+  const g = soldierProto[teamHex].clone(true);
+  const find = (name) => g.getObjectByName(name);
+  const legs = [0, 1].map(i => ({ leg: find('leg' + i), knee: find('knee' + i) }));
+  g.userData = { hips: find('hips'), legs, torso: find('torso'), head: find('head'), arms: find('arms'), gunSlot: find('gunSlot') };
+  return g;
+}
+
+function buildSoldierProto(teamHex) {
+  const g = new THREE.Group();
+  const { uni, vest, strap, team, boot, glove, helmM, skin, gogg } = soldierMats(teamHex);
+
+  const hips = new THREE.Group(); hips.name = 'hips'; hips.position.y = 0.92; g.add(hips);
   hips.add(mesh(new RoundedBoxGeometry(0.34, 0.18, 0.22, 2, 0.05), uni, 0, -0.02, 0));
   hips.add(mesh(new RoundedBoxGeometry(0.36, 0.05, 0.24, 2, 0.02), strap, 0, 0.05, 0));
   const legs = [];
   for (const s of [-1, 1]) {
-    const leg = new THREE.Group(); leg.position.set(0.1 * s, -0.04, 0); hips.add(leg);
+    const leg = new THREE.Group(); leg.name = 'leg' + legs.length; leg.position.set(0.1 * s, -0.04, 0); hips.add(leg);
     leg.add(mesh(capsule(0.085, 0.26), uni, 0, -0.2, 0));
     leg.add(mesh(new RoundedBoxGeometry(0.1, 0.12, 0.06, 2, 0.02), vest, 0.07 * s, -0.22, 0));   // Beintasche
-    const knee = new THREE.Group(); knee.position.set(0, -0.42, 0); leg.add(knee);
+    const knee = new THREE.Group(); knee.name = 'knee' + legs.length; knee.position.set(0, -0.42, 0); leg.add(knee);
     knee.add(mesh(new THREE.SphereGeometry(0.075, 10, 8), vest, 0, 0, -0.03));
     knee.add(mesh(capsule(0.072, 0.26), uni, 0, -0.2, 0));
     knee.add(mesh(new RoundedBoxGeometry(0.15, 0.12, 0.27, 2, 0.04), boot, 0, -0.4, -0.04));
     legs.push({ leg, knee });
   }
-  const torso = new THREE.Group(); hips.add(torso);
+  const torso = new THREE.Group(); torso.name = 'torso'; hips.add(torso);
   torso.add(mesh(new RoundedBoxGeometry(0.4, 0.5, 0.24, 3, 0.08), uni, 0, 0.3, 0));
   torso.add(mesh(new RoundedBoxGeometry(0.44, 0.38, 0.3, 3, 0.06), vest, 0, 0.32, 0));
   for (const x of [-0.12, 0, 0.12]) torso.add(mesh(new RoundedBoxGeometry(0.1, 0.12, 0.06, 2, 0.02), vest, x, 0.24, -0.17));
   torso.add(mesh(new RoundedBoxGeometry(0.34, 0.36, 0.14, 3, 0.05), strap, 0, 0.34, 0.2));                // Rucksack
   torso.add(mesh(new RoundedBoxGeometry(0.1, 0.06, 0.02, 1, 0.01), team, 0.13, 0.44, -0.156));            // Abzeichen
   const neck = mesh(capsule(0.06, 0.04), strap, 0, 0.6, 0); torso.add(neck);
-  const head = new THREE.Group(); head.position.y = 0.64; torso.add(head);
+  const head = new THREE.Group(); head.name = 'head'; head.position.y = 0.64; torso.add(head);
   head.add(mesh(new THREE.SphereGeometry(0.11, 16, 12), strap, 0, 0.1, 0));
   head.add(mesh(new RoundedBoxGeometry(0.15, 0.1, 0.06, 2, 0.025), skin, 0, 0.11, -0.075));
   const helmet = mesh(new THREE.SphereGeometry(0.135, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), helmM, 0, 0.13, 0.005);
@@ -425,7 +543,7 @@ export function buildSoldier(teamHex) {
   head.add(mesh(new RoundedBoxGeometry(0.17, 0.05, 0.05, 2, 0.02), gogg, 0, 0.12, -0.095));
   head.add(mesh(new RoundedBoxGeometry(0.16, 0.08, 0.1, 2, 0.03), strap, 0, 0.04, -0.06));               // Gesichtsschutz
   // Arme halten die Waffe (drehen mit Blickneigung)
-  const arms = new THREE.Group(); arms.position.set(0, 0.5, 0); torso.add(arms);
+  const arms = new THREE.Group(); arms.name = 'arms'; arms.position.set(0, 0.5, 0); torso.add(arms);
   const upperR = new THREE.Group(); upperR.position.set(0.22, 0, 0); arms.add(upperR);
   upperR.add(mesh(capsule(0.06, 0.2), uni, 0, -0.1, 0));
   upperR.add(mesh(new THREE.CylinderGeometry(0.066, 0.066, 0.05, 12), team, 0, -0.04, 0));
@@ -438,11 +556,11 @@ export function buildSoldier(teamHex) {
   upperL.rotation.set(1.1, 0, -0.35);
   const foreL = mesh(capsule(0.052, 0.24), uni, -0.06, -0.12, -0.36); foreL.rotation.set(1.45, -0.6, 0); arms.add(foreL);
   arms.add(mesh(new RoundedBoxGeometry(0.08, 0.08, 0.1, 2, 0.03), glove, 0.06, -0.08, -0.5));
-  const gunSlot = new THREE.Group(); gunSlot.position.set(0.1, -0.08, -0.26); arms.add(gunSlot);
+  const gunSlot = new THREE.Group(); gunSlot.name = 'gunSlot'; gunSlot.position.set(0.1, -0.08, -0.26); arms.add(gunSlot);
   for (const pv of [hips, torso, head, arms, gunSlot, ...legs.flatMap(l => [l.leg, l.knee])]) pv.userData.pivot = true;
-  for (const pv of [hips, torso, head, arms, ...legs.flatMap(l => [l.leg, l.knee])]) mergeStatic(pv);
+  const atlas = soldierAtlas(teamHex);
+  for (const pv of [hips, torso, head, arms, ...legs.flatMap(l => [l.leg, l.knee])]) mergeAtlas(pv, atlas, uni);
   g.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
-  g.userData = { hips, legs, torso, head, arms, gunSlot };
   return g;
 }
 

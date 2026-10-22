@@ -1,6 +1,7 @@
 // Baut die 3D-Szene einer Karte: Materialien, HDRI-Himmel & Umgebungslicht, Requisiten, Decals, Kulisse, Ziele
 import * as THREE from 'three';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MATS, materialMaps, letterTexture, decalTexture, waterNormal, paintedMaps } from './textures.js';
 import { TEAMS } from '/shared/constants.js';
 
@@ -198,6 +199,36 @@ function buildDecals(root, decals) {
   }
 }
 
+// ------------------------------------------------------------------ Statische Meshes pro Material zusammenfassen
+// (Requisiten, Decals, Kulisse) -> aus hunderten Draw-Calls werden wenige
+function mergeStaticMeshes(root, group) {
+  group.updateMatrixWorld(true);
+  const buckets = new Map();
+  const victims = [];
+  group.traverse(o => {
+    if (!o.isMesh || o.userData.dynamic || o.userData.sway !== undefined) return;
+    const key = o.material.uuid + '|' + (o.castShadow ? 1 : 0) + (o.receiveShadow ? 1 : 0);
+    let geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    geo.applyMatrix4(o.matrixWorld);
+    for (const n of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(n)) geo.deleteAttribute(n);
+    if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+    if (!geo.attributes.normal) geo.computeVertexNormals();
+    if (!buckets.has(key)) buckets.set(key, { m: o.material, cast: o.castShadow, recv: o.receiveShadow, geos: [], order: o.renderOrder });
+    buckets.get(key).geos.push(geo);
+    victims.push(o);
+  });
+  for (const v of victims) v.parent.remove(v);
+  for (const b of buckets.values()) {
+    const g = mergeGeometries(b.geos, false);
+    for (const x of b.geos) x.dispose();
+    if (!g) continue;
+    const m = new THREE.Mesh(g, b.m);
+    m.castShadow = b.cast; m.receiveShadow = b.recv; m.renderOrder = b.order;
+    root.add(m);
+  }
+  root.remove(group);
+}
+
 // ------------------------------------------------------------------ Hauptfunktion
 export function buildWorld(scene, map, opts = {}) {
   const root = new THREE.Group();
@@ -224,9 +255,11 @@ export function buildWorld(scene, map, opts = {}) {
     root.add(mesh);
     meshes.push(mesh);
   }
-  buildProps(root, props, aniso);
-  buildDecals(root, map.decals);
-  buildDecor(root, map.decor, aniso);
+  const statics = new THREE.Group();
+  root.add(statics);
+  buildProps(statics, props, aniso);
+  buildDecals(statics, map.decals);
+  buildDecor(statics, map.decor, aniso);
 
   // ---- Licht ----
   const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x5a5040, 0.35);
@@ -270,7 +303,7 @@ export function buildWorld(scene, map, opts = {}) {
   // ---- Kulisse ----
   const add = (x, y, z, w, h, d, m) => {
     const mm = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-    mm.position.set(x, y + h / 2, z); root.add(mm); return mm;
+    mm.position.set(x, y + h / 2, z); statics.add(mm); return mm;
   };
   let water = null;
   if (th.water) {
@@ -323,6 +356,12 @@ export function buildWorld(scene, map, opts = {}) {
     const spire = new THREE.Mesh(new THREE.ConeGeometry(5.6, 12, 4), new THREE.MeshStandardMaterial({ color: 0x3f5a4a, roughness: 0.4, metalness: 0.6 }));
     spire.position.set(0, 40, -50); spire.rotation.y = Math.PI / 4; root.add(spire);
   }
+
+  // Wäsche bleibt beweglich, alles andere wird zusammengefasst
+  const swaying = [];
+  statics.traverse(o => { if (o.userData.sway !== undefined) swaying.push(o); });
+  for (const o of swaying) { o.updateMatrixWorld(); root.attach(o); }
+  mergeStaticMeshes(root, statics);
 
   // ---- Flaggen (Herrschaft) ----
   const flagObjs = [];

@@ -25,6 +25,7 @@ Dann im Browser `http://localhost:3000` öffnen. Freunde im selben Netzwerk verb
 - **Killstreak:** Aufklärungsdrohne bei 4 Kills in Folge
 - **Netzcode:** Server-autoritativ für Treffer, Schaden und Munition, Lag-Kompensation, Bewegungsprüfung
 - **Accounts:** Registrierung mit Passwort (scrypt-Hash) oder Gastzugang ohne Speicherung
+- **Performance:** Dynamische Auflösung, gecachte und zusammengefasste Modelle, Partikel als zwei Draw-Calls, vorkompilierte Shader, Schatten nur jeden 3. Frame (Mittel), 20-Hz-Server mit verteilter Bot-Wegfindung
 - **Grafik:** Foto-Materialien (CC0) für Asphalt, Ziegel, Beton und Wellblech, HDRI-Himmel mit passendem Umgebungslicht, Schatten, Normal-Maps, Umgebungsverdeckung, Bloom; drei Qualitätsstufen in den Einstellungen (Niedrig / Mittel / Hoch)
 
 ## Steuerung
@@ -47,7 +48,7 @@ Dann im Browser `http://localhost:3000` öffnen. Freunde im selben Netzwerk verb
 
 ## Online hosten (z. B. Render)
 
-1. Repo bei [Render](https://render.com) als **Web Service** anlegen (die `render.yaml` ist schon dabei).
+1. Repo bei [Render](https://render.com) über **New → Blueprint** anlegen (die `render.yaml` ist schon dabei). Die Region ist auf **Frankfurt** gestellt – für Spieler in Europa deutlich weniger Ping als der Standard Oregon.
 2. Build: `npm install`, Start: `npm start`.
 3. **Wichtig für Accounts:** Auf kostenlosen Hostern wird das Dateisystem bei jedem Neustart gelöscht. Damit Level und Klassen erhalten bleiben, eine kostenlose Postgres-Datenbank anlegen (z. B. bei Neon oder Supabase) und deren URL als Umgebungsvariable `DATABASE_URL` setzen. Ohne `DATABASE_URL` speichert der Server in `data/users.json`.
 

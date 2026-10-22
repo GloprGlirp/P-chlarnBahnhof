@@ -1,6 +1,7 @@
 // Partikel, Leuchtspuren, Einschläge, Explosionen, Rauch
 import * as THREE from 'three';
 import { softTexture } from './textures.js';
+void softTexture;
 
 export class Effects {
   constructor(scene) {
@@ -10,16 +11,8 @@ export class Effects {
     this.decals = [];
     this.smokes = [];
     this.lights = [];
-    const soft = softTexture();
-    this.pool = [];
-    for (let i = 0; i < 420; i++) {
-      const m = new THREE.SpriteMaterial({ map: soft, transparent: true, depthWrite: false });
-      const s = new THREE.Sprite(m);
-      s.visible = false;
-      scene.add(s);
-      this.pool.push(s);
-    }
-    this.poolIdx = 0;
+    // Alle Partikel in zwei Punktwolken (normal + additiv) = 2 Draw-Calls statt hunderte Sprites
+    this.psys = [this.makeSystem(500, false), this.makeSystem(300, true)];
     this.tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
     this.tracerGeo = new THREE.BoxGeometry(1, 1, 1);
     this.decalGeo = new THREE.PlaneGeometry(0.09, 0.09);
@@ -32,7 +25,7 @@ export class Effects {
     // Lichtblitze
     for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(0xffb060, 0, 12, 2);
-      l.visible = false;
+      // Lichter bleiben immer sichtbar (Intensität 0), sonst kompiliert three.js bei jedem Mündungsfeuer alle Shader neu
       scene.add(l);
       this.lights.push({ l, t: 0, max: 0 });
     }
@@ -46,34 +39,68 @@ export class Effects {
     };
   }
 
-  sprite() {
-    const s = this.pool[this.poolIdx];
-    this.poolIdx = (this.poolIdx + 1) % this.pool.length;
-    const old = this.particles.indexOf(s.userData.p);
-    if (old >= 0) this.particles.splice(old, 1);
-    return s;
+  makeSystem(max, additive) {
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(max * 3), col = new Float32Array(max * 4), size = new Float32Array(max);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aColor', new THREE.BufferAttribute(col, 4).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: true,
+      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uScale: { value: 400 } }]),
+      vertexShader: `
+        attribute vec4 aColor; attribute float aSize; uniform float uScale; varying vec4 vColor;
+        #include <fog_pars_vertex>
+        void main() {
+          vColor = aColor;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = aSize > 0.0 ? aSize * uScale / max(0.05, -mvPosition.z) : 0.0;
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `
+        varying vec4 vColor;
+        #include <fog_pars_fragment>
+        void main() {
+          float d = length(gl_PointCoord - 0.5) * 2.0;
+          if (d > 1.0) discard;
+          float a = 1.0 - d; a = a * (0.6 + 0.4 * a);
+          gl_FragColor = vec4(vColor.rgb, vColor.a * a);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    pts.renderOrder = 5;
+    this.scene.add(pts);
+    const slots = [];
+    for (let i = 0; i < max; i++) slots.push({ i, life: 0, max: 1, pos: new THREE.Vector3(), vel: new THREE.Vector3(), col: new THREE.Color(), size: 0, grow: 0, gravity: 0, opacity: 1, drag: 0 });
+    return { pts, geo, pos, col, size, slots, next: 0, max, dirty: true };
   }
 
   particle(pos, vel, { color = 0xffffff, size = 0.2, grow = 0, life = 0.5, gravity = 0, opacity = 1, additive = false, drag = 0 }) {
-    const s = this.sprite();
-    s.position.copy(pos);
-    s.material.color.set(color);
-    s.material.opacity = opacity;
-    s.material.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending;
-    s.material.rotation = Math.random() * 6.28;
-    s.scale.set(size, size, size);
-    s.visible = true;
-    const p = { s, vel: vel.clone(), life, max: life, size, grow, gravity, opacity, drag };
-    s.userData.p = p;
-    this.particles.push(p);
+    const sys = this.psys[additive ? 1 : 0];
+    const p = sys.slots[sys.next];
+    sys.next = (sys.next + 1) % sys.max;
+    p.pos.copy(pos); p.vel.copy(vel); p.col.set(color);
+    p.size = size; p.grow = grow; p.life = life; p.max = life; p.gravity = gravity; p.opacity = opacity; p.drag = drag;
+    sys.dirty = true;
     return p;
+  }
+
+  // Projektionsmaßstab für Punktgrößen (Pixel pro Meter in 1 m Entfernung)
+  setProjection(heightPx, fovDeg) {
+    const k = heightPx / (2 * Math.tan(fovDeg * Math.PI / 360));
+    for (const s of this.psys) s.pts.material.uniforms.uScale.value = k;
   }
 
   flashLight(pos, intensity = 30, dur = 0.06, color = 0xffb060, dist = 12) {
     const L = this.lights.reduce((a, b) => (a.t < b.t ? a : b));
     L.l.position.copy(pos); L.l.color.set(color); L.l.distance = dist;
     L.t = dur; L.max = dur; L.peak = intensity;
-    L.l.visible = true;
     L.l.intensity = intensity;
   }
 
@@ -81,14 +108,29 @@ export class Effects {
     const d = new THREE.Vector3().subVectors(to, from);
     const len = d.length();
     if (len < 2) return;
-    const m = new THREE.Mesh(this.tracerGeo, this.tracerMat.clone());
+    d.divideScalar(len);
+    if (!this.tracerPool) this.tracerPool = [];
+    let t = this.tracerPool.find(x => !x.active);
+    if (!t) {
+      if (this.tracerPool.length >= 24) t = this.tracerPool[0];
+      else {
+        const m = new THREE.Mesh(this.tracerGeo, this.tracerMat.clone());
+        m.frustumCulled = false;
+        this.scene.add(m);
+        t = { m, dir: new THREE.Vector3() };
+        this.tracerPool.push(t);
+      }
+    }
     const segLen = Math.min(len * 0.6, 7);
-    m.scale.set(0.018, 0.018, segLen);
-    m.lookAt(d);
-    m.position.copy(from).addScaledVector(d.normalize(), segLen / 2 + 1.0);
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), d);
-    this.scene.add(m);
-    this.tracers.push({ m, life: 0.07, dir: d.clone(), speed: len / 0.07 * 0.8, travelled: 0, len, segLen });
+    t.m.scale.set(0.018, 0.018, segLen);
+    t.m.position.copy(from).addScaledVector(d, segLen / 2 + 1.0);
+    t.m.quaternion.setFromUnitVectors(this._zAxis || (this._zAxis = new THREE.Vector3(0, 0, 1)), d);
+    t.m.visible = true;
+    t.dir.copy(d);
+    t.speed = len / 0.07 * 0.8;
+    t.life = 0.07;
+    t.active = true;
+    if (!this.tracers.includes(t)) this.tracers.push(t);
   }
 
   impact(pos, normal, surface) {
@@ -103,14 +145,24 @@ export class Effects {
       const v = n.clone().multiplyScalar(0.6 + Math.random()).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, Math.random() * 0.5, (Math.random() - 0.5) * 0.6));
       this.particle(pos.clone().addScaledVector(n, 0.05), v, { color: dust, size: 0.12, grow: 0.9, life: 0.7, opacity: 0.55, drag: 2 });
     }
-    // Einschussloch
-    const d = new THREE.Mesh(this.decalGeo, this.decalMat);
-    d.position.copy(pos).addScaledVector(n, 0.012);
-    d.lookAt(d.position.clone().add(n));
-    d.rotation.z = Math.random() * 6;
-    this.scene.add(d);
-    this.decals.push(d);
-    if (this.decals.length > 120) { const o = this.decals.shift(); this.scene.remove(o); }
+    // Einschussloch (alle Löcher in einem InstancedMesh = 1 Draw-Call)
+    if (!this.decalMesh) {
+      this.decalMesh = new THREE.InstancedMesh(this.decalGeo, this.decalMat, 80);
+      this.decalMesh.count = 0; this.decalN = 0;
+      this.decalMesh.frustumCulled = false;
+      this.scene.add(this.decalMesh);
+      this._dObj = new THREE.Object3D();
+    }
+    const o = this._dObj;
+    o.position.copy(pos).addScaledVector(n, 0.012);
+    o.lookAt(o.position.x + n.x, o.position.y + n.y, o.position.z + n.z);
+    o.rotateZ(Math.random() * 6);
+    o.updateMatrix();
+    const idx = this.decalN % 80;
+    this.decalMesh.setMatrixAt(idx, o.matrix);
+    this.decalN++;
+    this.decalMesh.count = Math.min(80, this.decalN);
+    this.decalMesh.instanceMatrix.needsUpdate = true;
   }
 
   blood(pos) {
@@ -182,30 +234,41 @@ export class Effects {
   }
 
   update(dt) {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.life -= dt;
-      if (p.life <= 0) { p.s.visible = false; this.particles.splice(i, 1); continue; }
-      p.vel.y -= p.gravity * dt;
-      if (p.drag) p.vel.multiplyScalar(Math.max(0, 1 - p.drag * dt));
-      p.s.position.addScaledVector(p.vel, dt);
-      const k = p.life / p.max;
-      const sz = p.size * (1 + p.grow * (1 - k));
-      p.s.scale.set(sz, sz, sz);
-      p.s.material.opacity = p.opacity * Math.min(1, k * 2);
+    for (const sys of this.psys) {
+      if (!sys.dirty) continue;
+      let alive = 0;
+      for (const p of sys.slots) {
+        const i = p.i;
+        if (p.life <= 0) { if (sys.size[i] !== 0) sys.size[i] = 0; continue; }
+        alive++;
+        p.life -= dt;
+        if (p.life <= 0) { sys.size[i] = 0; continue; }
+        p.vel.y -= p.gravity * dt;
+        if (p.drag) p.vel.multiplyScalar(Math.max(0, 1 - p.drag * dt));
+        p.pos.addScaledVector(p.vel, dt);
+        const k = p.life / p.max;
+        sys.pos[i * 3] = p.pos.x; sys.pos[i * 3 + 1] = p.pos.y; sys.pos[i * 3 + 2] = p.pos.z;
+        sys.col[i * 4] = p.col.r; sys.col[i * 4 + 1] = p.col.g; sys.col[i * 4 + 2] = p.col.b;
+        sys.col[i * 4 + 3] = p.opacity * Math.min(1, k * 2);
+        sys.size[i] = p.size * (1 + p.grow * (1 - k));
+      }
+      sys.geo.attributes.position.needsUpdate = true;
+      sys.geo.attributes.aColor.needsUpdate = true;
+      sys.geo.attributes.aSize.needsUpdate = true;
+      if (!alive) sys.dirty = false;
     }
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const t = this.tracers[i];
       t.life -= dt;
       t.m.position.addScaledVector(t.dir, t.speed * dt);
       t.m.material.opacity = Math.max(0, t.life / 0.07) * 0.85;
-      if (t.life <= 0) { this.scene.remove(t.m); t.m.material.dispose(); this.tracers.splice(i, 1); }
+      if (t.life <= 0) { t.m.visible = false; t.active = false; this.tracers.splice(i, 1); }
     }
     for (const L of this.lights) {
       if (L.t > 0) {
         L.t -= dt;
         L.l.intensity = Math.max(0, L.peak * (L.t / L.max));
-        if (L.t <= 0) L.l.visible = false;
+        if (L.t <= 0) L.l.intensity = 0;
       }
     }
     for (let i = this.smokes.length - 1; i >= 0; i--) {
@@ -224,10 +287,8 @@ export class Effects {
   }
 
   clear() {
-    for (const p of this.particles) p.s.visible = false;
-    this.particles = [];
-    for (const d of this.decals) this.scene.remove(d);
-    this.decals = [];
+    for (const sys of this.psys) { for (const p of sys.slots) p.life = 0; sys.size.fill(0); sys.geo.attributes.aSize.needsUpdate = true; }
+    if (this.decalMesh) { this.decalMesh.count = 0; this.decalN = 0; }
     for (const sm of this.smokes) for (const p of sm.parts) this.scene.remove(p.s);
     this.smokes = [];
     for (const m of this.nadeMeshes.values()) this.scene.remove(m);

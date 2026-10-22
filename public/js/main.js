@@ -5,7 +5,7 @@ import { renderLogin, renderMenu, renderPause, renderEnd } from './ui/menus.js';
 import { Game } from './game/game.js';
 import { audio } from './game/audio.js';
 
-const DEFAULTS = { sens: 1.0, adsSens: 0.85, fov: 95, volume: 0.6, scale: 1, invertY: false, toggleAds: false, quality: 'medium', showFps: false };
+const DEFAULTS = { sens: 1.0, adsSens: 0.85, fov: 95, volume: 0.6, scale: 1, invertY: false, toggleAds: false, quality: 'medium', showFps: false, autoRes: true };
 
 class App {
   constructor() {
@@ -14,16 +14,26 @@ class App {
     if (this.settings.shadows === false && !this.settings.quality) this.settings.quality = 'low';
     delete this.settings.shadows;
     if (!['low', 'medium', 'high'].includes(this.settings.quality)) this.settings.quality = 'medium';
+    // Erster Start: bei Software-Rendering / schwachen Mobil-GPUs direkt Niedrig wählen
+    if (!localStorage.getItem('kh_settings')) {
+      try {
+        const gl = document.createElement('canvas').getContext('webgl2');
+        const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+        const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+        if (/SwiftShader|llvmpipe|Software|Mali|Adreno|PowerVR/i.test(name)) this.settings.quality = 'low';
+      } catch { /* egal */ }
+    }
     this.net = new Net();
     this.profile = null;
     this.game = null;
     this.tabCleanup = null;
     this.canvas = document.getElementById('gl');
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+    // Kantenglättung (MSAA) kostet viel – auf Niedrig aus (gilt nach Neuladen)
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: this.settings.quality !== 'low', powerPreference: 'high-performance', stencil: false });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x1d2316);
     this.renderer.setSize(innerWidth, innerHeight, false);
     audio.setVolume(this.settings.volume);

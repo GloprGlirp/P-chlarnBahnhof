@@ -93,10 +93,27 @@ class AudioEngine {
     o.start(t); o.stop(t + dur + 0.02);
   }
 
+  // Begrenzt gleichzeitige Sounds – viele Audio-Knoten pro Sekunde kosten CPU und erzeugen Knackser
+  budget(cost) {
+    const now = this.ctx.currentTime;
+    if (now - (this.budgetT || 0) > 0.1) { this.budgetT = now; this.budgetUsed = 0; }
+    if (this.budgetUsed + cost > 14) return false;
+    this.budgetUsed += cost;
+    return true;
+  }
+
   shot(cls, pos, suppressed) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const dist = pos ? Math.hypot(pos.x - this.listener.x, pos.y - this.listener.y, pos.z - this.listener.z) : 0;
+    if (pos && !this.budget(dist > 45 ? 1 : 2)) return;
+    if (pos && dist > 120) return;
     const dest = this.out(pos, suppressed ? 2 : 6);
+    if (pos && dist > 45) {
+      // weit weg: ein einfacher, dumpfer Knall reicht
+      this.noiseBurst(dest, t, { dur: suppressed ? 0.08 : 0.3, freq: suppressed ? 1200 : 600, q: 0.5, gain: suppressed ? 0.25 : 0.7, brown: !suppressed });
+      return;
+    }
     const v = 0.9 + Math.random() * 0.2;
     if (suppressed) {
       this.noiseBurst(dest, t, { dur: 0.09, freq: 1400 * v, q: 0.7, gain: 0.35 });
@@ -120,6 +137,7 @@ class AudioEngine {
 
   footstep(pos, loud = 1, surface = 0) {
     if (!this.ctx) return;
+    if (pos && !this.budget(1)) return;
     const t = this.ctx.currentTime;
     const dest = this.out(pos, 2.5);
     this.noiseBurst(dest, t, { dur: 0.07, freq: surface ? 2200 : 700 + Math.random() * 300, q: 1.2, gain: 0.22 * loud });

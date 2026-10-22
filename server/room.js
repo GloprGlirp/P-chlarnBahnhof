@@ -925,6 +925,7 @@ export class Room {
   // ------------------------------------------------------------------ Tick
   tick(dt) {
     const t = now();
+    this.pathBudget = 2;
     // Phasen
     if (this.phase === 'pre' && t >= this.phaseEnd) {
       this.phase = 'live';

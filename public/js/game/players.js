@@ -42,21 +42,27 @@ export class RemotePlayer {
       this.model = buildSoldier(TEAMS[info.team].hex);
       this.scene.add(this.model);
       this.gunKey = '';
+      this.tagKey = null;
     }
     const key = `${info.pw}|${(info.pa || []).join(',')}|${info.sw}|${info.pcm}|${info.scm}`;
     if (key !== this.gunKey) {
       this.gunKey = key;
       const slot = this.model.userData.gunSlot;
       slot.clear();
-      this.guns = { 0: buildGun(info.pw, info.pa || [], info.pcm), 1: buildGun(info.sw, [], info.scm) };
+      this.guns = { 0: buildGun(info.pw, info.pa || [], info.pcm, true), 1: buildGun(info.sw, [], info.scm, true) };
       for (const g of Object.values(this.guns)) { g.scale.setScalar(1.15); slot.add(g); }
     }
     const friendly = info.team === myTeam;
-    if (this.tag) { this.model.remove(this.tag); this.tag = null; }
-    if (friendly) {
-      this.tag = textSprite(info.name.replace('[BOT] ', ''), '#9cc6ff');
-      this.tag.position.y = 2.15;
-      this.model.add(this.tag);
+    // Namensschild nur neu bauen, wenn sich etwas geändert hat (sonst neue Textur alle 1,5 s)
+    const tagKey = friendly ? info.name : '';
+    if (tagKey !== this.tagKey || (this.tag && this.tag.parent !== this.model)) {
+      if (this.tag) { this.tag.parent && this.tag.parent.remove(this.tag); this.tag.material.map.dispose(); this.tag.material.dispose(); this.tag = null; }
+      if (friendly) {
+        this.tag = textSprite(info.name.replace('[BOT] ', ''), '#9cc6ff');
+        this.tag.position.y = 2.15;
+        this.model.add(this.tag);
+      }
+      this.tagKey = tagKey;
     }
     this.friendly = friendly;
   }
@@ -71,6 +77,16 @@ export class RemotePlayer {
     const b = this.buf;
     if (!b.length) return null;
     if (rt <= b[0].ts) return b[0];
+    // Puffer leer (Paket verspätet): kurz weiter extrapolieren statt einzufrieren
+    const last = b[b.length - 1];
+    if (rt >= last.ts) {
+      const prev = b[b.length - 2];
+      if (prev && last.ts > prev.ts && Math.abs(last.x - prev.x) + Math.abs(last.z - prev.z) < 3) {
+        const k = Math.min(rt - last.ts, 150) / (last.ts - prev.ts);
+        return { ...last, x: last.x + (last.x - prev.x) * k, z: last.z + (last.z - prev.z) * k };
+      }
+      return last;
+    }
     for (let i = b.length - 1; i >= 0; i--) {
       if (b[i].ts <= rt) {
         const a = b[i], c = b[i + 1];
