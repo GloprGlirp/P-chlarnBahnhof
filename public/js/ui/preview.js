@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { buildGun } from '../game/models.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { updateCamos } from '../game/camos.js';
 
 export class GunPreview {
   constructor(canvas) {
@@ -42,15 +43,16 @@ export class GunPreview {
         this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
       }
       if (this.drag === null) this.angle += 0.004;
+      updateCamos(1 / 60);
       this.holder.rotation.y = Math.sin(this.angle) * 0.6 - 0.2;
       this.renderer.render(this.scene, this.camera);
     };
     loop();
   }
 
-  show(weaponId, att) {
+  show(weaponId, att, camo) {
     this.holder.clear();
-    const g = buildGun(weaponId, att);
+    const g = buildGun(weaponId, att, camo);
     const box = new THREE.Box3().setFromObject(g);
     const size = box.getSize(new THREE.Vector3());
     const c = box.getCenter(new THREE.Vector3());

@@ -20,6 +20,14 @@ export function botName(used) {
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
+function botCamo(diff) {
+  const r = Math.random();
+  if (diff === 'hard' && r < 0.12) return pick(['gold', 'diamond', 'darkmatter']);
+  if (r < 0.06) return 'gold';
+  if (r < 0.5) return pick(['woodland', 'desert', 'digital', 'tiger', 'arctic', 'sakura', 'carbon', 'crimson']);
+  return 'none';
+}
+
 export function makeBotClass(diff) {
   const pool = diff === 'easy' ? ['kr7', 'vipera', 'striker', 'hornet', 'kr7'] : ['kr7', 'vipera', 'striker', 'longbow', 'hornet', 'atlas', 'dmr14', 'tempest', 'hydra', 'kr7', 'vipera'];
   const pid = pick(pool);
@@ -33,7 +41,7 @@ export function makeBotClass(diff) {
   }
   const perks = [1, 2, 3].map(s => pick(Object.values(PERKS).filter(p => p.slot === s && p.id !== 'ghost')).id);
   return {
-    name: 'Bot', primary: { id: pid, att }, secondary: { id: pick(['p9', 'p9', 'bulldog', 'mp5k']), att: [] },
+    name: 'Bot', primary: { id: pid, att, camo: botCamo(diff) }, secondary: { id: pick(['p9', 'p9', 'bulldog', 'mp5k']), att: [], camo: botCamo(diff) },
     lethal: Math.random() < 0.7 ? 'frag' : 'semtex', tactical: Math.random() < 0.6 ? 'flash' : 'smoke', perks,
   };
 }

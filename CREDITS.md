@@ -24,7 +24,7 @@ Bezogen über das [three.js-Repository](https://github.com/mrdoob/three.js) (`ex
 
 ## Selbst erstellt
 
-Alle übrigen Texturen (Holz, Kisten, Kopfsteinpflaster, Dachziegel, Steine, Fässer, Tarnmuster, Wasser) samt Normal-Maps, alle Waffen- und Soldatenmodelle sowie alle Sounds werden zur Laufzeit im Code erzeugt.
+Alle übrigen Texturen (Holz, Kisten, Kopfsteinpflaster, Dachziegel, Steine, Fässer, Tarnmuster, Waffentarnungen inkl. Gold/Diamant/Dunkle Materie, Wasser) samt Normal-Maps, alle Waffen- und Soldatenmodelle sowie alle Sounds werden zur Laufzeit im Code erzeugt.
 
 ## Bibliotheken
 

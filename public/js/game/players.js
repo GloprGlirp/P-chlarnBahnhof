@@ -43,12 +43,12 @@ export class RemotePlayer {
       this.scene.add(this.model);
       this.gunKey = '';
     }
-    const key = `${info.pw}|${(info.pa || []).join(',')}|${info.sw}`;
+    const key = `${info.pw}|${(info.pa || []).join(',')}|${info.sw}|${info.pcm}|${info.scm}`;
     if (key !== this.gunKey) {
       this.gunKey = key;
       const slot = this.model.userData.gunSlot;
       slot.clear();
-      this.guns = { 0: buildGun(info.pw, info.pa || []), 1: buildGun(info.sw, []) };
+      this.guns = { 0: buildGun(info.pw, info.pa || [], info.pcm), 1: buildGun(info.sw, [], info.scm) };
       for (const g of Object.values(this.guns)) { g.scale.setScalar(1.15); slot.add(g); }
     }
     const friendly = info.team === myTeam;

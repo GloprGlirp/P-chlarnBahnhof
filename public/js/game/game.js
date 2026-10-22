@@ -12,6 +12,9 @@ import { Hud, weaponLabel, esc } from './hud.js';
 import { Input } from './input.js';
 import { audio } from './audio.js';
 import { PostFX } from './postfx.js';
+import { updateCamos } from './camos.js';
+import { CAMO_NAMES, camoKind } from '/shared/camos.js';
+import { WEAPONS } from '/shared/weapons.js';
 
 const DEG = Math.PI / 180;
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3();
@@ -211,6 +214,14 @@ export class Game {
       }
       case 'died': return this.onDied(m);
       case 'xp': this.hud.xp(m.a, m.r); return;
+      case 'camo': {
+        const kind = camoKind(m.c);
+        const wn = WEAPONS[m.w] ? WEAPONS[m.w].name : '';
+        const col = { gold: '#ffd25a', diamond: '#bfe6ff', darkmatter: '#c38bff', base: '#e8c56c' }[kind];
+        this.hud.banner(`${CAMO_NAMES[m.c]} freigeschaltet`, kind === 'darkmatter' ? 'Für alle Waffen' : kind === 'diamond' ? `Alle Waffen der Klasse` : wn, kind === 'base' ? 2.2 : 3.5, col);
+        if (kind === 'base') audio.announce('good'); else audio.levelUp();
+        return;
+      }
       case 'ev': return this.onEvent(m);
       case 'boom': {
         const pos = { x: m.x, y: m.y, z: m.z };
@@ -562,6 +573,7 @@ export class Game {
     for (const p of this.players.values()) p.update(dt, rt, now);
     this.effects.grenades(this.effects.lastNades || [], dt);
     this.effects.update(dt);
+    updateCamos(dt);
     this.world.update(now / 1000, this.modeState, this.camera.position);
     if (this.scene.environment && this.vm.scene.environment !== this.scene.environment) { this.vm.scene.environment = this.scene.environment; this.vm.scene.environmentIntensity = 0.8; }
     this.updateBomb(now);

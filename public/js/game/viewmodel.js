@@ -68,7 +68,7 @@ export class ViewModel {
     this.guns = {};
     for (const slot of ['primary', 'secondary']) {
       const w = cls[slot];
-      const g = buildGun(w.id, w.att);
+      const g = buildGun(w.id, w.att, w.camo);
       this.addArms(g, slot === 'secondary', w.id);
       g.visible = false;
       this.root.add(g);

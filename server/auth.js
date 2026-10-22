@@ -63,7 +63,7 @@ export function publicProfile(user) {
   return {
     username: user.username,
     xp: d.xp, level: levelInfo(d.xp),
-    weaponXp: d.weaponXp, classes: d.classes, stats: d.stats,
+    weaponXp: d.weaponXp, weaponStats: d.weaponStats || {}, classes: d.classes, stats: d.stats,
     guest: !!user.guest,
   };
 }

@@ -112,7 +112,7 @@ class App {
         }
         break;
       case 'end':
-        if (m.summary && this.profile) { this.profile.level = m.summary.level; this.profile.weaponXp = m.summary.weaponXp; this.profile.xp = m.summary.xp; this.profile.stats = m.summary.stats; }
+        if (m.summary && this.profile) { this.profile.level = m.summary.level; this.profile.weaponXp = m.summary.weaponXp; this.profile.xp = m.summary.xp; this.profile.stats = m.summary.stats; if (m.summary.weaponStats) this.profile.weaponStats = m.summary.weaponStats; }
         break;
     }
   }

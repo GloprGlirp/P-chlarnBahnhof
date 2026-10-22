@@ -17,6 +17,7 @@ Dann im Browser `http://localhost:3000` öffnen. Freunde im selben Netzwerk verb
 - **Karten:** Werft (Containerhafen mit Lagerhalle und Kai) und Altstadt (Gassen, Marktplatz, begehbare Häuser)
 - **Waffen:** 9 Primärwaffen (Sturmgewehre, MPs, Schrotflinten, MG, Präzisions- und Scharfschützengewehr) und 3 Sekundärwaffen
 - **Waffenschmied:** 15 Aufsätze in 6 Kategorien, max. 5 pro Waffe, freigeschaltet über Waffenlevel (Kills mit der Waffe)
+- **Tarnungen:** 8 Tarnungen pro Waffe über Herausforderungen (Kills, Kopfschüsse, Weitschüsse, Hüftfeuer, Doppel-Kills); alle 8 → **Gold**, Gold auf allen Waffen einer Klasse → **Diamant**, Diamant in allen Klassen → **Dunkle Materie** (animiert)
 - **Progression:** Spielerlevel 1–55 schaltet Waffen, Perks und Ausrüstung frei; 5 eigene Klassen
 - **Perks:** 9 Perks in 3 Slots (Leichtgewicht, Geist, Lautlos, Plünderer …)
 - **Ausrüstung:** Splitter- und Haftgranate, Blend- und Rauchgranate, Messer

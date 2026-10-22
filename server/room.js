@@ -7,6 +7,7 @@ import { MODES, TEAMS, TEAM_SIZE, PLAYER, STANCE, XP, INTERP_DELAY, MAX_REWIND, 
 import { WEAPONS, EQUIPMENT, computeStats, damageAt } from '../shared/weapons.js';
 import { validateClass, levelInfo, weaponLevelInfo, unlocksAt, attachmentUnlocksAt } from '../shared/progression.js';
 import { buildNav } from './nav.js';
+import { BASE_CAMOS, CAMO_NAMES, CAMO_XP, LONGSHOT, emptyStats, mergeStats, unlockKeys, camoKind } from '../shared/camos.js';
 import { BotBrain, makeBotClass, botName } from './bots.js';
 import { saveUser } from './db.js';
 
@@ -84,7 +85,7 @@ export class Room {
       hist: [], classIndex: 0, cls: null, stats: {}, slot: 'primary', ammo: {},
       reloadEnd: 0, swapEnd: 0, lastShot: 0, lastMelee: 0, lethal: 0, tactical: 0,
       kills: 0, deaths: 0, assists: 0, score: 0, streak: 0, caps: 0, plants: 0, defuses: 0, headshots: 0,
-      xpMatch: 0, xpLog: {}, weaponXpMatch: {}, statsMatch: { kills: 0, deaths: 0, assists: 0, headshots: 0, bestStreak: 0 },
+      xpMatch: 0, xpLog: {}, weaponXpMatch: {}, wsMatch: {}, lastKillT: 0, statsMatch: { kills: 0, deaths: 0, assists: 0, headshots: 0, bestStreak: 0 },
       respawnAt: 0, spawnProtUntil: 0, dmgFrom: new Map(), ping: 0, lastStateT: 0, moveBudget: 3, spawnSeq: 0,
       interact: false, joinedAt: now(), blindUntil: 0, perks: [], level: user ? levelInfo(user.data.xp).level : 1,
       ms: null,
@@ -180,7 +181,7 @@ export class Room {
     this.firstBlood = false;
     for (const p of this.players.values()) {
       Object.assign(p, { kills: 0, deaths: 0, assists: 0, score: 0, streak: 0, caps: 0, plants: 0, defuses: 0, headshots: 0, alive: false });
-      p.xpMatch = 0; p.xpLog = {}; p.weaponXpMatch = {};
+      p.xpMatch = 0; p.xpLog = {}; p.weaponXpMatch = {}; p.wsMatch = {};
       p.statsMatch = { kills: 0, deaths: 0, assists: 0, headshots: 0, bestStreak: 0 };
     }
     if (this.mode === 'dom') this.flags = this.map.dom.map(f => ({ ...f, owner: -1, capTeam: -1, prog: 0 }));
@@ -699,7 +700,11 @@ export class Room {
         this.uav[k.team] = t + 18000;
         this.event(`${k.name} ruft eine Aufklärungsdrohne`, { kind: 'uav', team: k.team });
       }
-      if (WEAPONS[info.weapon]) k.weaponXpMatch[info.weapon] = (k.weaponXpMatch[info.weapon] || 0) + 100 + (info.head ? 25 : 0);
+      if (WEAPONS[info.weapon]) {
+        k.weaponXpMatch[info.weapon] = (k.weaponXpMatch[info.weapon] || 0) + 100 + (info.head ? 25 : 0);
+        if (!k.bot && k.user) this.trackCamo(k, v, info, t);
+      }
+      k.lastKillT = t;
       if (k.perks.includes('scavenger') && k.alive) {
         for (const slot of ['primary', 'secondary']) k.ammo[slot].res = Math.min(k.stats[slot].reserve * 1.5, k.ammo[slot].res + k.stats[slot].mag);
         k.lethal = Math.max(k.lethal, 1);
@@ -732,6 +737,33 @@ export class Room {
     if (v.bot) v.bot.onDeath();
     if (this.mode === 'tdm' && this.phase === 'live' && (this.score[0] >= this.M.scoreLimit || this.score[1] >= this.M.scoreLimit)) {
       this.endMatch(this.score[0] >= this.M.scoreLimit ? 0 : 1);
+    }
+  }
+
+  // Tarnungs-Herausforderungen zählen und Freischaltungen sofort melden
+  trackCamo(k, v, info, t) {
+    const wid = info.weapon;
+    const stored = k.user.data.weaponStats || (k.user.data.weaponStats = {});
+    const before = unlockKeys(mergeStats(stored, k.wsMatch));
+    const st = k.wsMatch[wid] || (k.wsMatch[wid] = emptyStats());
+    st.kills++;
+    if (info.head) st.heads++;
+    const dist = Math.hypot(k.pos.x - v.pos.x, k.pos.z - v.pos.z);
+    if (dist >= (LONGSHOT[WEAPONS[wid].cls] || 30)) st.long++;
+    if (!k.ads && !info.melee) st.hip++;
+    if (t - k.lastKillT < 4000) st.doubles++;
+    const after = unlockKeys(mergeStats(stored, k.wsMatch));
+    const seen = new Set();
+    for (const key of after) {
+      if (before.has(key)) continue;
+      const [w, c] = key.split(':');
+      const kind = camoKind(c);
+      const dedupe = kind === 'darkmatter' ? c : kind === 'diamond' ? c + WEAPONS[w].cls : key;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      this.send(k, { t: 'camo', w, c });
+      this.giveXp(k, CAMO_XP[kind], `Tarnung ${CAMO_NAMES[c]}`);
+      if (kind !== 'base') this.event(`${k.name} hat ${CAMO_NAMES[c]} freigeschaltet${kind === 'darkmatter' ? '!' : ` (${WEAPONS[w].name})`}`, { kind: 'mastery' });
     }
   }
 
@@ -819,6 +851,20 @@ export class Room {
       const a = weaponLevelInfo(d.weaponXp[wid]).level;
       for (let l = b + 1; l <= a; l++) weaponUps.push({ weapon: wid, level: l, unlocks: attachmentUnlocksAt(wid, l) });
     }
+    const beforeKeys = unlockKeys(d.weaponStats || {});
+    d.weaponStats = mergeStats(d.weaponStats, p.wsMatch);
+    const camoUnlocks = [];
+    const seen = new Set();
+    for (const key of unlockKeys(d.weaponStats)) {
+      if (beforeKeys.has(key)) continue;
+      const [w, c] = key.split(':');
+      const kind = camoKind(c);
+      const dedupe = kind === 'darkmatter' ? c : kind === 'diamond' ? c + WEAPONS[w].cls : key;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      camoUnlocks.push({ weapon: w, camo: c, kind });
+    }
+    p.wsMatch = {};
     const s = d.stats;
     s.kills += p.statsMatch.kills; s.deaths += p.statsMatch.deaths; s.assists += p.statsMatch.assists;
     s.headshots += p.statsMatch.headshots;
@@ -828,7 +874,7 @@ export class Room {
     p.statsMatch = { kills: 0, deaths: 0, assists: 0, headshots: 0, bestStreak: 0 };
     p.level = after;
     if (!u.guest) saveUser(u).catch(e => console.error('save', e.message));
-    return { before, after, unlocks, weaponUps, level: levelInfo(d.xp), weaponXp: d.weaponXp, xp: d.xp, stats: d.stats };
+    return { before, after, unlocks, weaponUps, camoUnlocks, level: levelInfo(d.xp), weaponXp: d.weaponXp, weaponStats: d.weaponStats, xp: d.xp, stats: d.stats };
   }
 
   // ------------------------------------------------------------------ Roster & Snapshots
@@ -836,7 +882,7 @@ export class Room {
     const list = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, team: p.team, bot: p.bot ? 1 : 0, k: p.kills, d: p.deaths, a: p.assists, sc: p.score,
       ping: p.bot ? 0 : Math.round(p.ping), lv: p.level, pw: p.cls ? p.cls.primary.id : 'kr7', sw: p.cls ? p.cls.secondary.id : 'p9',
-      pa: p.cls ? p.cls.primary.att : [], alive: p.alive ? 1 : 0,
+      pa: p.cls ? p.cls.primary.att : [], pcm: p.cls ? p.cls.primary.camo || 'none' : 'none', scm: p.cls ? p.cls.secondary.camo || 'none' : 'none', alive: p.alive ? 1 : 0,
     }));
     this.broadcast({ t: 'roster', list });
   }

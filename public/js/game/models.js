@@ -4,6 +4,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WEAPONS } from '/shared/weapons.js';
 import { paintedMaps, materialMaps } from './textures.js';
+import { camoMaterial } from './camos.js';
 
 // ---------------------------------------------------------------- Materialien
 const matCache = {};
@@ -109,7 +110,7 @@ function mergeStatic(group, keep = new Set()) {
 
 // ---------------------------------------------------------------- Waffen
 // Rückgabe: Gruppe mit Lauf entlang -Z, Ursprung am Griff. userData: muzzle, sightY, sightZ, optic, mag
-export function buildGun(weaponId, attachments = []) {
+export function buildGun(weaponId, attachments = [], camo = 'none') {
   const W = WEAPONS[weaponId] || WEAPONS.kr7;
   const md = W.model;
   const has = a => attachments.includes(a);
@@ -117,10 +118,13 @@ export function buildGun(weaponId, attachments = []) {
   const g = new THREE.Group();
   g.rotation.y = Math.PI / 2;
   outer.add(g);
-  const body = gunMetal(md.color);
-  const acc = polymer(md.accent);
+  const cm = camoMaterial(camo);
+  const mastery = camo === 'gold' || camo === 'diamond' || camo === 'darkmatter';
+  const body = cm || gunMetal(md.color);
+  const acc = cm || polymer(md.accent);
+  const wood = () => cm || woodMat();
   const dark = gunMetal(0x1a1b1c);
-  const blk = polymer(0x161718);
+  const blk = mastery ? cm : polymer(0x161718);
   const L = md.len;
   const kind = md.kind;
   const pistol = kind === 'pistol' || kind === 'revolver';
@@ -190,14 +194,14 @@ export function buildGun(weaponId, attachments = []) {
     ext(g, [[-0.04, 0.012], [-0.04, top], [recEnd, top], [recEnd, 0.008], [0.11, 0.0], [0.0, 0.0], [-0.03, 0.01]], 0.052, body, 0.005);
     rail(g, dark, -0.03, recEnd - 0.02, top);
     // Holzschaft
-    ext(g, [[-0.04, 0.062], [-0.33, 0.055], [-0.34, 0.045], [-0.34, -0.07], [-0.32, -0.078], [-0.16, -0.035], [-0.03, -0.075], [0.01, -0.07], [0.0, 0.002], [-0.04, 0.012]], 0.046, woodMat(), 0.007);
+    ext(g, [[-0.04, 0.062], [-0.33, 0.055], [-0.34, 0.045], [-0.34, -0.07], [-0.32, -0.078], [-0.16, -0.035], [-0.03, -0.075], [0.01, -0.07], [0.0, 0.002], [-0.04, 0.012]], 0.046, wood(), 0.007);
     rbox(g, blk, 0.014, 0.13, 0.05, -0.34, -0.008, 0, 0.005);
     ext(g, [[0.03, 0.0], [0.09, 0.0], [0.085, -0.03], [0.035, -0.03]], 0.012, blk, 0.002, [[[0.04, -0.006], [0.08, -0.006], [0.076, -0.024], [0.042, -0.024]]]);
     const len = L * 0.62 + md.barrel;
     cyl(g, dark, 0.016, len, recEnd, 0.052);
     cyl(g, dark, 0.013, len * 0.78, recEnd, 0.02);                          // Röhrenmagazin
     const pump = new THREE.Group(); g.add(pump);
-    for (let i = 0; i < 6; i++) cyl(pump, i % 2 ? woodMat() : polymer(0x2a1d14), 0.024, 0.022, recEnd + 0.06 + i * 0.022, 0.022);
+    for (let i = 0; i < 6; i++) cyl(pump, i % 2 ? wood() : (mastery ? cm : polymer(0x2a1d14)), 0.024, 0.022, recEnd + 0.06 + i * 0.022, 0.022);
     mag = pump;
     if (md.mag === 'drum') { const d = cyl(g, blk, 0.07, 0.07, 0.1, -0.06); d.rotation.y = Math.PI / 2; d.position.set(0.12, -0.07, 0); mag = d; }
     frontX = recEnd + len; barrelY = 0.052; barrelLen = 0;
@@ -225,7 +229,7 @@ export function buildGun(weaponId, attachments = []) {
       cyl(g, body, 0.026, 0.05, 0.015, 0.05).rotation.x = 0.3;
       cyl(g, body, 0.012, L - 0.05, 0.07, 0.06);
       rbox(g, body, L - 0.06, 0.012, 0.016, 0.07 + (L - 0.06) / 2, 0.072, 0, 0.003);
-      ext(g, [[-0.025, 0.0], [0.012, 0.0], [0.0, -0.06], [-0.012, -0.095], [-0.05, -0.095], [-0.045, -0.05]], 0.034, woodMat(), 0.006);
+      ext(g, [[-0.025, 0.0], [0.012, 0.0], [0.0, -0.06], [-0.012, -0.095], [-0.05, -0.095], [-0.045, -0.05]], 0.034, wood(), 0.006);
       frontX = L + 0.02; barrelY = 0.06;
       railY = 0.078;
     } else {

@@ -7,6 +7,8 @@ import {
 } from '/shared/weapons.js';
 import { weaponLevelInfo, unlocksAt, MAX_LEVEL, CLASS_COUNT } from '/shared/progression.js';
 import { GunPreview } from './preview.js';
+import { BASE_CAMOS, MASTERY_CAMOS, CAMO_NAMES, STAT_LABELS, unlockedCamos, isGold, isDiamond, isDarkMatter, classWeapons } from '/shared/camos.js';
+import { camoSwatch } from '../game/camos.js';
 import { audio } from '../game/audio.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -206,7 +208,8 @@ function renderClasses(app, c) {
       const w = cl[slot];
       const W = WEAPONS[w.id];
       const att = w.att.map(a => ATTACHMENTS[a].name).join(', ') || 'Keine Aufsätze';
-      return `<div class="slotline"><div class="k">${label}</div><div class="v">${esc(W.name)}<small>${esc(CLASS_LABELS[W.cls])} · ${esc(att)}</small></div><button class="btn small ghost" data-smith="${slot}">Bearbeiten</button></div>`;
+      const cn = w.camo && w.camo !== 'none' ? ` · ${CAMO_NAMES[w.camo]}` : '';
+      return `<div class="slotline"><div class="k">${label}</div><div class="v"><span class="sw" style="background-image:url(${camoSwatch(w.camo || 'none')})"></span>${esc(W.name)}<small>${esc(CLASS_LABELS[W.cls])} · ${esc(att)}${esc(cn)}</small></div><button class="btn small ghost" data-smith="${slot}">Bearbeiten</button></div>`;
     };
     el.innerHTML = `<div class="sheet">
       <div class="sheet-head"><input type="text" id="cname" maxlength="20" value="${esc(cl.name)}" aria-label="Klassenname"></div>
@@ -256,6 +259,7 @@ function renderClasses(app, c) {
             const lo = Math.min(a, b), hi = Math.max(a, b);
             return `<div class="stat"><span>${k}</span><div class="bar"><i style="width:${lo}%"></i>${b !== a ? `<i class="${b > a ? 'up' : 'down'}" style="left:${lo}%;width:${hi - lo}%"></i>` : ''}</div><span class="num">${b}</span></div>`;
           }).join('')}</div>
+          ${camoSection(P, w)}
         </div>
         <div>
           <h3 style="margin-top:0">Aufsätze <span class="xptext">${w.att.length} / ${MAX_ATTACHMENTS}</span></h3>
@@ -279,11 +283,12 @@ function renderClasses(app, c) {
       </div>`;
     $(el, '#back').onclick = () => { audio.click(); smith = null; draw(); };
     if (!preview || preview.canvas !== $(el, 'canvas')) { if (preview) preview.dispose(); preview = new GunPreview($(el, 'canvas')); }
-    preview.show(w.id, w.att);
+    preview.show(w.id, w.att, w.camo);
     $$(el, '[data-w]').forEach(b => b.onclick = () => {
       audio.click();
       w.id = b.dataset.w;
       w.att = [];
+      w.camo = 'none';
       save(); drawSmith(el, cl);
       $(c, `[data-c="${sel}"] span`).textContent = `${WEAPONS[cl.primary.id].name} · ${WEAPONS[cl.secondary.id].name}`;
     });
@@ -299,10 +304,62 @@ function renderClasses(app, c) {
       };
       if (a) b.onmouseenter = () => { $(el, '#adesc').textContent = ATTACHMENTS[a].desc; };
     });
+    $$(el, '[data-camo]').forEach(b => {
+      const id = b.dataset.camo;
+      b.onmouseenter = () => { $(el, '#cinfo').innerHTML = camoInfo(P, w.id, id); };
+      b.onfocus = b.onmouseenter;
+      b.onclick = () => {
+        if (b.classList.contains('locked')) { $(el, '#cinfo').innerHTML = camoInfo(P, w.id, id); return; }
+        audio.click();
+        w.camo = id;
+        save(); drawSmith(el, cl);
+      };
+    });
   };
 
   draw();
   app.tabCleanup = () => { if (preview) preview.dispose(); clearTimeout(saveT); if (saveT) app.net.send({ t: 'saveClasses', classes }); };
+}
+
+// ---------------------------------------------------------------- Tarnungen
+function statOf(P, wid, st) { return ((P.weaponStats || {})[wid] || {})[st] || 0; }
+
+function camoSection(P, w) {
+  const un = unlockedCamos(P.weaponStats, w.id);
+  const done = BASE_CAMOS.filter(c => un.has(c.id)).length;
+  const btn = (id, mastery) => {
+    const locked = !un.has(id);
+    const base = BASE_CAMOS.find(c => c.id === id);
+    const pct = base ? Math.min(1, statOf(P, w.id, base.stat) / base.need) : 0;
+    return `<button class="camo ${mastery ? 'mastery' : ''} ${(w.camo || 'none') === id ? 'on' : ''} ${locked ? 'locked' : ''}" data-camo="${id}" aria-label="${esc(id === 'none' ? 'Keine Tarnung' : CAMO_NAMES[id])}" style="background-image:url(${camoSwatch(id)})">${locked && base ? `<span class="pg"><i style="width:${Math.round(pct * 100)}%"></i></span>` : ''}</button>`;
+  };
+  const next = BASE_CAMOS.find(c => !un.has(c.id));
+  return `<h3>Tarnungen <span class="xptext">${done} / ${BASE_CAMOS.length}</span></h3>
+    <div class="camos">${btn('none')}${BASE_CAMOS.map(c => btn(c.id)).join('')}</div>
+    <div class="camos" style="margin-top:8px">${MASTERY_CAMOS.map(c => btn(c.id, true)).join('')}</div>
+    <div class="att-desc camo-info" id="cinfo">${next ? camoInfo(P, w.id, next.id) : camoInfo(P, w.id, w.camo || 'gold')}</div>`;
+}
+
+function camoInfo(P, wid, id) {
+  if (id === 'none') return '<b>Keine Tarnung</b>';
+  const base = BASE_CAMOS.find(c => c.id === id);
+  if (base) {
+    const v = Math.min(base.need, statOf(P, wid, base.stat));
+    return `<b>${esc(base.name)}</b> · ${base.need} ${esc(STAT_LABELS[base.stat])} mit dieser Waffe<div class="xpbar" style="width:220px;margin-top:4px"><i style="width:${Math.round(v / base.need * 100)}%"></i></div><span class="xptext">${v} / ${base.need}</span>`;
+  }
+  const W = WEAPONS[wid];
+  if (id === 'gold') {
+    const d = BASE_CAMOS.filter(c => statOf(P, wid, c.stat) >= c.need).length;
+    return `<b>Gold</b> · Alle ${BASE_CAMOS.length} Tarnungen dieser Waffe freischalten <span class="xptext">(${d} / ${BASE_CAMOS.length})</span>`;
+  }
+  if (id === 'diamond') {
+    const ws = classWeapons(W.cls);
+    const g = ws.filter(x => isGold(P.weaponStats, x));
+    return `<b>Diamant</b> · Gold auf allen Waffen der Klasse ${esc(CLASS_LABELS[W.cls])} <span class="xptext">(${g.length} / ${ws.length}: ${esc(ws.map(x => WEAPONS[x].name + (isGold(P.weaponStats, x) ? ' ✓' : '')).join(', '))})</span>`;
+  }
+  const classes = [...new Set(Object.values(WEAPONS).map(x => x.cls))];
+  const dia = classes.filter(cl => isDiamond(P.weaponStats, classWeapons(cl)[0]));
+  return `<b>Dunkle Materie</b> · Diamant in allen Waffenklassen <span class="xptext">(${dia.length} / ${classes.length})</span>`;
 }
 
 // ---------------------------------------------------------------- Profil
@@ -336,10 +393,11 @@ function renderProfile(app, c) {
         <div class="roadmap">${road.map(r => `<div class="lv">${r.l}</div><div class="it ${r.l <= lv ? 'got' : ''}">${r.u.map(x => `${esc(x.name)} <span class="xptext">(${x.type === 'weapon' ? 'Waffe' : x.type === 'perk' ? 'Perk' : 'Ausrüstung'})</span>`).join(', ')}${r.l <= lv ? ' ✓' : ''}</div>`).join('')}</div>
       </section>
       <section>
-        <h3>Waffenlevel</h3>
-        <table class="list"><thead><tr><th>Waffe</th><th>Level</th><th>XP</th></tr></thead><tbody>
-        ${wl.map(x => `<tr><td>${esc(x.w.name)}</td><td>${x.info.level}</td><td>${x.xp}</td></tr>`).join('')}
+        <h3>Waffen &amp; Tarnungen</h3>
+        <table class="list"><thead><tr><th>Waffe</th><th>Level</th><th>Tarnungen</th><th>Gold</th><th>Diamant</th></tr></thead><tbody>
+        ${wl.map(x => { const un = unlockedCamos(P.weaponStats, x.w.id); return `<tr><td>${esc(x.w.name)}</td><td>${x.info.level}</td><td>${BASE_CAMOS.filter(c => un.has(c.id)).length} / ${BASE_CAMOS.length}</td><td>${un.has('gold') ? '<span class="mast gold">Gold</span>' : '–'}</td><td>${un.has('diamond') ? '<span class="mast diamond">Diamant</span>' : '–'}</td></tr>`; }).join('')}
         </tbody></table>
+        <p class="hint">${isDarkMatter(P.weaponStats) ? '<span class="mast darkmatter">Dunkle Materie</span> freigeschaltet – für alle Waffen.' : 'Dunkle Materie: Diamant in allen Waffenklassen freischalten.'}</p>
       </section>
     </div>`;
 }
@@ -469,6 +527,7 @@ export function renderEnd(app, m, game) {
           </div>
           ${sum.after > sum.before ? `<div class="unlock"><b>Level ${sum.after} erreicht!</b></div>` : ''}
           ${sum.unlocks.map(u => `<div class="unlock">Freigeschaltet: <b>${esc(u.name)}</b> <span class="xptext">(${u.type === 'weapon' ? 'Waffe' : u.type === 'perk' ? 'Perk' : 'Ausrüstung'})</span></div>`).join('')}
+          ${(sum.camoUnlocks || []).map(u => `<div class="unlock ${u.kind !== 'base' ? 'mast-' + u.kind : ''}">Tarnung freigeschaltet: <b>${esc(CAMO_NAMES[u.camo])}</b> <span class="xptext">(${u.kind === 'darkmatter' ? 'alle Waffen' : u.kind === 'diamond' ? 'Klasse ' + esc(CLASS_LABELS[WEAPONS[u.weapon].cls]) : esc(W(u.weapon))})</span></div>`).join('')}
           ${sum.weaponUps.map(u => `<div class="unlock">${esc(W(u.weapon))} erreicht Waffenlevel <b>${u.level}</b>${u.unlocks.length ? ` · neu: <b>${esc(u.unlocks.map(x => x.name).join(', '))}</b>` : ''}</div>`).join('')}
         ` : ''}
         <div style="display:flex;gap:10px;margin-top:22px">

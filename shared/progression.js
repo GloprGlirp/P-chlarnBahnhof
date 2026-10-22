@@ -1,5 +1,6 @@
 // Level, XP-Kurven, Freischaltungen und Klassen-Validierung
 import { WEAPONS, ATTACHMENTS, PERKS, EQUIPMENT, CLASS_ATTACHMENTS, MAX_ATTACHMENTS, WEAPON_MAX_LEVEL } from './weapons.js';
+import { unlockedCamos } from './camos.js';
 
 export const MAX_LEVEL = 55;
 export const CLASS_COUNT = 5;
@@ -57,12 +58,13 @@ export function newProfileData() {
   return {
     xp: 0,
     weaponXp: {},
+    weaponStats: {},
     classes: Array.from({ length: CLASS_COUNT }, (_, i) => defaultClass(i)),
     stats: { kills: 0, deaths: 0, assists: 0, headshots: 0, wins: 0, losses: 0, matches: 0, bestStreak: 0 },
   };
 }
 
-function validWeapon(entry, slot, level, weaponXp) {
+function validWeapon(entry, slot, level, weaponXp, weaponStats) {
   const fallback = slot === 'primary' ? 'kr7' : 'p9';
   let id = entry && WEAPONS[entry.id] && WEAPONS[entry.id].slot === slot && WEAPONS[entry.id].unlock <= level ? entry.id : fallback;
   const wl = weaponLevelInfo((weaponXp || {})[id] || 0).level;
@@ -75,7 +77,8 @@ function validWeapon(entry, slot, level, weaponXp) {
     if (att.length >= MAX_ATTACHMENTS) break;
     used.add(A.slot); att.push(a);
   }
-  return { id, att };
+  const camo = entry && typeof entry.camo === 'string' && unlockedCamos(weaponStats, id).has(entry.camo) ? entry.camo : 'none';
+  return { id, att, camo };
 }
 
 // Bereinigt eine vom Client geschickte Klasse gegen den Fortschritt des Spielers
@@ -85,8 +88,8 @@ export function validateClass(cls, profile) {
   const c = cls || {};
   const out = {
     name: String(c.name || 'Klasse').slice(0, 20),
-    primary: validWeapon(c.primary, 'primary', level, wx),
-    secondary: validWeapon(c.secondary, 'secondary', level, wx),
+    primary: validWeapon(c.primary, 'primary', level, wx, profile.weaponStats),
+    secondary: validWeapon(c.secondary, 'secondary', level, wx, profile.weaponStats),
     lethal: EQUIPMENT[c.lethal] && EQUIPMENT[c.lethal].type === 'lethal' && EQUIPMENT[c.lethal].unlock <= level ? c.lethal : 'frag',
     tactical: EQUIPMENT[c.tactical] && EQUIPMENT[c.tactical].type === 'tactical' && EQUIPMENT[c.tactical].unlock <= level ? c.tactical : 'flash',
     perks: [],
